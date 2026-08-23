@@ -2,7 +2,7 @@
 // @name         CLOP Dynamic UI
 // @namespace    clop-userscript
 // @version      0.3.0
-// @description  Modular client-side UI replacement for CLOP. Merged dynamic marketplace (sell/buy orders in one page), nav menu cleanup.
+// @description  Modular client-side UI replacement for CLOP. Merged dynamic marketplace (sell/buy orders in one page).
 // @match        https://4clop.org/*
 // @match        https://*.4clop.org/*
 // @match        http://localhost/*
@@ -105,23 +105,6 @@
           localStorage.setItem(key, value);
         } catch (e) {
         }
-      }
-    }
-  };
-
-  // src/ui/navbar.js
-  var navbarModule = {
-    name: "navbar",
-    matches: () => true,
-    init() {
-      const nav = document.querySelector("nav.navbar");
-      if (!nav) return;
-      for (const a of nav.querySelectorAll('a[href^="buyermarketplace.php"]')) {
-        const li = a.closest("li");
-        if (li) li.remove();
-      }
-      for (const a of nav.querySelectorAll('a[href="marketplace.php"]')) {
-        a.textContent = "Marketplace";
       }
     }
   };
@@ -329,7 +312,7 @@
         sell: createMarketAdapter(core2, "sell", mode, hostKind === "sell" ? document : null),
         buyer: createMarketAdapter(core2, "buyer", mode, hostKind === "buyer" ? document : null)
       };
-      const LAST_RESOURCE_KEY = `clopus.market.last.${mode || "resources"}`;
+      const lastKey = (side) => `clopus.market.last.${side}.${mode || "resources"}`;
       const SHOW_DNA_KEY = "clopus.market.showDna";
       const state = {
         side: hostKind,
@@ -353,7 +336,7 @@
         state.activeId = boot.resourceId;
         if (boot.orders.length || marketIsEmpty(document)) state.updatedAt = /* @__PURE__ */ new Date();
       } else {
-        const remembered = core2.storage.get(LAST_RESOURCE_KEY);
+        const remembered = core2.storage.get(lastKey(hostKind));
         if (remembered && state.resources.some((r) => r.id === remembered)) state.activeId = remembered;
       }
       function resourceName(id) {
@@ -374,7 +357,7 @@
         state.messages = snap.messages;
         if (snap.resourceId) {
           state.activeId = snap.resourceId;
-          core2.storage.set(LAST_RESOURCE_KEY, snap.resourceId);
+          core2.storage.set(lastKey(snap.kind), snap.resourceId);
         }
         state.updatedAt = /* @__PURE__ */ new Date();
       }
@@ -394,6 +377,8 @@
       function switchSide(side) {
         if (state.busy || side === state.side) return;
         state.side = side;
+        const remembered = core2.storage.get(lastKey(side));
+        if (remembered && state.resources.some((r) => r.id === remembered)) state.activeId = remembered;
         state.orders = [];
         state.updatedAt = null;
         state.messages = { errors: [], infos: [] };
@@ -649,7 +634,6 @@
   };
 
   // src/main.js
-  core.register(navbarModule);
   core.register(marketplaceModule);
   core.boot();
   window.CLOPUS = core;

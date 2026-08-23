@@ -2,7 +2,7 @@
 // @name         CLOP Dynamic UI
 // @namespace    clop-userscript
 // @version      0.3.0
-// @description  Modular client-side UI replacement for CLOP. Merged dynamic marketplace (sell/buy orders in one page), nav menu cleanup.
+// @description  Modular client-side UI replacement for CLOP. Merged dynamic marketplace (sell/buy orders in one page).
 // @match        https://4clop.org/*
 // @match        https://*.4clop.org/*
 // @match        http://localhost/*

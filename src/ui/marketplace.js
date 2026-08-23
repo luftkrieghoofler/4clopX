@@ -40,7 +40,9 @@ export const marketplaceModule = {
             buyer: createMarketAdapter(core, 'buyer', mode, hostKind === 'buyer' ? document : null),
         };
 
-        const LAST_RESOURCE_KEY = `clopus.market.last.${mode || 'resources'}`;
+        // Last-visited resource is remembered per side (and per mode), so the
+        // sell and buy tabs each restore their own market.
+        const lastKey = (side) => `clopus.market.last.${side}.${mode || 'resources'}`;
         const SHOW_DNA_KEY = 'clopus.market.showDna';
 
         /* ---------------- state ---------------- */
@@ -67,7 +69,7 @@ export const marketplaceModule = {
             state.activeId = boot.resourceId;
             if (boot.orders.length || marketIsEmpty(document)) state.updatedAt = new Date();
         } else {
-            const remembered = core.storage.get(LAST_RESOURCE_KEY);
+            const remembered = core.storage.get(lastKey(hostKind));
             if (remembered && state.resources.some((r) => r.id === remembered)) state.activeId = remembered;
         }
 
@@ -95,7 +97,7 @@ export const marketplaceModule = {
             state.messages = snap.messages;
             if (snap.resourceId) {
                 state.activeId = snap.resourceId;
-                core.storage.set(LAST_RESOURCE_KEY, snap.resourceId);
+                core.storage.set(lastKey(snap.kind), snap.resourceId);
             }
             state.updatedAt = new Date();
         }
@@ -118,6 +120,10 @@ export const marketplaceModule = {
         function switchSide(side) {
             if (state.busy || side === state.side) return;
             state.side = side;
+            // Restore this side's own last-visited resource; if it has none
+            // yet, carry the current selection over.
+            const remembered = core.storage.get(lastKey(side));
+            if (remembered && state.resources.some((r) => r.id === remembered)) state.activeId = remembered;
             state.orders = [];
             state.updatedAt = null;
             state.messages = { errors: [], infos: [] };

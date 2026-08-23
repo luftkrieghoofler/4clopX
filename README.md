@@ -40,7 +40,6 @@ src/
                           POST vocabulary, HTML parsing, stock-page surgery
   ui/
     marketplace.js        merged marketplace frontend (pure UI)
-    navbar.js             "Capitalism" menu cleanup (runs on every page)
 dist/
   clop.user.js            build output — the file you install
 ```
@@ -91,16 +90,17 @@ MarketSnapshot = {
 
 `marketplace.php` and `buyermarketplace.php` (plus their weapons/armor modes)
 are now one UI with two top-level tabs, **Sell Orders** (listings you can buy
-from) and **Buy Orders** (offers you can sell to). The navbar module collapses
-each Capitalism menu pair into a single entry ("Marketplace",
-"Weapons Marketplace", "Armor Marketplace").
+from) and **Buy Orders** (offers you can sell to). The stock Capitalism menu
+items are left alone: both pages host the same UI, opened on the side the
+visited page corresponds to, so the "Buyer's ..." entries still take you
+straight to the buy side.
 
-Both stock pages host the same UI — there is no custom "root page", because
-the script still needs a server-rendered shell (session, header, nav) to live
-in. Switching sides never navigates: the other endpoint is driven by its own
-adapter, and `history.replaceState` swaps the URL between the two stock paths
-so refresh and bookmarks land on the view you were on. The non-host side's
-token is seeded lazily with one GET the first time you switch to it.
+There is no custom "root page", because the script still needs a
+server-rendered shell (session, header, nav) to live in. Switching sides never
+navigates: the other endpoint is driven by its own adapter, and
+`history.replaceState` swaps the URL between the two stock paths so refresh
+and bookmarks land on the view you were on. The non-host side's token is
+seeded lazily with one GET the first time you switch to it.
 
 Features carried over from the single-page version: resource tabs with owned
 counts and a DNA show/hide toggle, Refresh, dynamic buy/sell/place/remove,
