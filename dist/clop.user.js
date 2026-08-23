@@ -351,8 +351,16 @@
           name,
           qty: cellNumber(cells[cQty].textContent),
           used: cellNumber(cells[cUsed].textContent),
+          mil: 0,
           net: cellNumber(cells[cNet].textContent)
         };
+      }
+      for (const c of panel.querySelectorAll("center")) {
+        if (!/military also uses/i.test(c.textContent)) continue;
+        for (const m of c.textContent.matchAll(/([\d,]+)\s+([A-Za-z]+)/g)) {
+          const entry = byName[m[2].toLowerCase()];
+          if (entry) entry.mil = cellNumber(m[1]);
+        }
       }
       return { byName, at: /* @__PURE__ */ new Date() };
     }
@@ -502,6 +510,8 @@
         else sweepFavourites();
       };
       const upkeepFor = (resourceId) => state.upkeep ? state.upkeep.byName[resourceName(resourceId).toLowerCase()] || null : null;
+      const reserveOf = (up) => up.used + up.mil;
+      const reserveText = (up) => up.mil ? `${core2.commas(up.used)}/tick upkeep + ${core2.commas(up.mil)} military/12h` : `${core2.commas(up.used)}/tick upkeep`;
       let upkeepFetching = false;
       async function maybeFetchUpkeep() {
         if (mode || state.upkeep || upkeepFetching) return;
@@ -524,14 +534,15 @@
           const stats = await fetchResourceStats(core2);
           state.upkeep = stats;
           const fresh = stats.byName[name.toLowerCase()];
-          if (!fresh || fresh.used !== expected.used) {
+          const freshReserve = fresh ? reserveOf(fresh) : null;
+          if (!fresh || freshReserve !== expected.reserve) {
             state.messages = {
-              errors: [`Not sold: the upkeep of ${name} changed — used to be ${core2.commas(expected.used)}, now it's ${fresh ? core2.commas(fresh.used) : "unknown"}. Check the numbers and try again if you're happy.`],
+              errors: [`Not sold: the upkeep of ${name} changed — used to be ${core2.commas(expected.reserve)}, now it's ${fresh ? `${core2.commas(freshReserve)} (${reserveText(fresh)})` : "unknown"}. Check the numbers and try again if you're happy.`],
               infos: []
             };
             return;
           }
-          const freshMax = Math.min(fresh.qty - fresh.used, order.amount);
+          const freshMax = Math.min(fresh.qty - freshReserve, order.amount);
           if (freshMax !== expected.n) {
             state.messages = {
               errors: [`Not sold: your ${name} stock changed — Sell Max would now sell ${core2.commas(Math.max(0, freshMax))} instead of ${core2.commas(expected.n)}. Check the numbers and try again if you're happy.`],
@@ -862,9 +873,9 @@ Sell ${core2.commas(expected.n)} anyway?`
         if (have < order.amount) {
           btn.disabled = true;
           btn.title = `You only have ${core2.commas(have)}`;
-        } else if (up && have - up.used < order.amount) {
+        } else if (up && have - reserveOf(up) < order.amount) {
           btn.disabled = true;
-          btn.title = `Selling all ${core2.commas(order.amount)} would eat into your ${core2.commas(up.used)}/tick upkeep — use Sell Max`;
+          btn.title = `Selling all ${core2.commas(order.amount)} would eat into your reserve of ${core2.commas(reserveOf(up))} (${reserveText(up)}) — use Sell Max`;
         }
         return btn;
       }
@@ -878,19 +889,20 @@ Sell ${core2.commas(expected.n)} anyway?`
           btn.title = state.upkeep ? "No upkeep data for this resource on the Overview page" : "Fetching upkeep from the Overview page…";
           return btn;
         }
-        const max = Math.min(have - up.used, order.amount);
+        const reserve = reserveOf(up);
+        const max = Math.min(have - reserve, order.amount);
         if (max < 1) {
           btn.textContent = "Sell Max";
           btn.disabled = true;
-          btn.title = `Nothing to spare: you have ${core2.commas(have)} and use ${core2.commas(up.used)}/tick`;
-        } else if (have - up.used > order.amount) {
+          btn.title = `Nothing to spare: you have ${core2.commas(have)} and keep ${core2.commas(reserve)} back (${reserveText(up)})`;
+        } else if (have - reserve > order.amount) {
           btn.textContent = `Sell Max (${core2.commas(max)}: ${core2.commas(Math.floor(order.price * max * state.mult.sell))} bits)`;
           btn.disabled = true;
-          btn.title = `You can spare ${core2.commas(have - up.used)} — more than this whole order; use Sell All`;
+          btn.title = `You can spare ${core2.commas(have - reserve)} — more than this whole order; use Sell All`;
         } else {
           btn.textContent = `Sell Max (${core2.commas(max)}: ${core2.commas(Math.floor(order.price * max * state.mult.sell))} bits)`;
-          btn.title = `Sell everything above your ${core2.commas(up.used)}/tick upkeep (${core2.commas(have)} − ${core2.commas(up.used)}); upkeep is re-verified before selling`;
-          btn.addEventListener("click", () => sellMax(order, { used: up.used, n: max }, btn));
+          btn.title = `Sell everything above your reserve of ${core2.commas(reserve)} (${reserveText(up)}); re-verified before selling`;
+          btn.addEventListener("click", () => sellMax(order, { reserve, n: max }, btn));
         }
         return btn;
       }

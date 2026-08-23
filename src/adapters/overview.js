@@ -7,7 +7,12 @@
 // Resource names come from resourcedefs.name — the same strings the
 // marketplace select options use — so callers can match by name.
 //
-// Returns { byName: { <lowercased name>: {name, qty, used, net} }, at: Date }.
+// The military's separate consumption ("Your military also uses N apples,
+// N gems, N coffee, and N gasoline every 12 hours."), rendered below the
+// table inside the same panel, is exposed as `mil` (0 for everything else).
+// It is a 12-hour lump, NOT part of the per-tick "Used" column or "Net".
+//
+// Returns { byName: { <lowercased name>: {name, qty, used, mil, net} }, at: Date }.
 
 function cellNumber(text) {
     const n = parseInt(text.replace(/,/g, '').trim(), 10);
@@ -38,8 +43,19 @@ export function parseResourceStats(doc) {
                 name,
                 qty: cellNumber(cells[cQty].textContent),
                 used: cellNumber(cells[cUsed].textContent),
+                mil: 0,
                 net: cellNumber(cells[cNet].textContent),
             };
+        }
+        for (const c of panel.querySelectorAll('center')) {
+            if (!/military also uses/i.test(c.textContent)) continue;
+            // "1,234 apples, 56 gems, ..." — pair numbers with the word that
+            // follows; words that aren't resource names (e.g. "12 hours")
+            // simply don't match anything.
+            for (const m of c.textContent.matchAll(/([\d,]+)\s+([A-Za-z]+)/g)) {
+                const entry = byName[m[2].toLowerCase()];
+                if (entry) entry.mil = cellNumber(m[1]);
+            }
         }
         return { byName, at: new Date() };
     }

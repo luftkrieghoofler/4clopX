@@ -138,9 +138,12 @@ refresh).
 ### Sell Max (buy orders, resources mode)
 
 Next to Sell All, each buy order gets **Sell Max (N: X bits)** — sell all
-spare stock, i.e. owned minus the per-tick "Used" upkeep from the Overview
-page's Resources table. The two buttons are mutually exclusive: Sell All is
-disabled when filling the whole order would eat into upkeep, Sell Max is
+spare stock, i.e. owned minus a reserve of the per-tick "Used" upkeep from
+the Overview page's Resources table **plus** the military's separate 12-hour
+consumption (apples/gems/coffee/gasoline, parsed from the line under that
+table; reserved in full since it lands as a lump, not per tick). The two
+buttons are mutually exclusive: Sell All is
+disabled when filling the whole order would eat into the reserve, Sell Max is
 disabled when your spare stock covers the whole order (Sell All is then the
 right tool); when spare stock exactly equals the order both are enabled
 (equivalent).
