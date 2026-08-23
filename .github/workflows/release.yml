@@ -1,0 +1,39 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - run: npm run build
+
+      - name: Create GitHub release
+        # Annotated tag message becomes the release notes; falls back to
+        # auto-generated notes for lightweight/message-less tags. The re-fetch
+        # is needed because actions/checkout peels annotated tags.
+        run: |
+          git fetch --force origin "refs/tags/$GITHUB_REF_NAME:refs/tags/$GITHUB_REF_NAME"
+          if [ "$(git cat-file -t "$GITHUB_REF_NAME")" = "tag" ]; then
+            git tag -l --format='%(contents)' "$GITHUB_REF_NAME" > notes.md
+            gh release create "$GITHUB_REF_NAME" dist/clop.user.js --notes-file notes.md
+          else
+            gh release create "$GITHUB_REF_NAME" dist/clop.user.js --generate-notes
+          fi
+        env:
+          GH_TOKEN: ${{ github.token }}

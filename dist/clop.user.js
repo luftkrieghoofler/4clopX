@@ -7,6 +7,8 @@
 // @match        https://*.4clop.org/*
 // @match        http://localhost/*
 // @match        https://localhost/*
+// @updateURL    https://github.com/luftkrieghoofler/4clopX/releases/latest/download/clop.user.js
+// @downloadURL  https://github.com/luftkrieghoofler/4clopX/releases/latest/download/clop.user.js
 // @run-at       document-end
 // @grant        none
 // ==/UserScript==
