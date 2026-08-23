@@ -90,6 +90,33 @@
     commas(n) {
       return Number(n).toLocaleString("en-US");
     },
+    /* ---------------- settings ----------------
+     * Registry of user-editable settings.  Modules declare theirs with
+     * define() at init; a future settings UI will enumerate all() to build
+     * itself, so every toggleable behavior must be declared here even while
+     * no UI exists.  Values persist under clopus.setting.<key>. */
+    settings: {
+      _defs: /* @__PURE__ */ new Map(),
+      // def: { key, label, description, type: 'bool', default }
+      define(def) {
+        this._defs.set(def.key, def);
+      },
+      all() {
+        return [...this._defs.values()];
+      },
+      get(key) {
+        const def = this._defs.get(key);
+        const raw = core.storage.get(`clopus.setting.${key}`);
+        if (raw === null) return def ? def.default : null;
+        if (def && def.type === "bool") return raw === "1";
+        return raw;
+      },
+      set(key, value) {
+        const def = this._defs.get(key);
+        const raw = def && def.type === "bool" ? value ? "1" : "0" : String(value);
+        core.storage.set(`clopus.setting.${key}`, raw);
+      }
+    },
     /* ---------------- storage ---------------- */
     storage: {
       get(key, fallback = null) {
@@ -297,6 +324,44 @@
     };
   }
 
+  // src/adapters/overview.js
+  function cellNumber(text) {
+    const n = parseInt(text.replace(/,/g, "").trim(), 10);
+    return Number.isFinite(n) ? n : 0;
+  }
+  function parseResourceStats(doc) {
+    for (const panel of doc.querySelectorAll(".panel")) {
+      const heading = panel.querySelector(".panel-heading");
+      if (!heading || heading.textContent.trim() !== "Resources") continue;
+      const table = panel.querySelector("table");
+      if (!table) break;
+      const headCells = [...table.querySelectorAll("thead td, thead th")].map((c) => c.textContent.trim());
+      const cName = headCells.indexOf("Resource");
+      const cQty = headCells.indexOf("Qty");
+      const cUsed = headCells.indexOf("Used");
+      const cNet = headCells.indexOf("Net");
+      if (cName < 0 || cQty < 0 || cUsed < 0 || cNet < 0) break;
+      const byName = {};
+      for (const tr of table.querySelectorAll("tbody tr")) {
+        const cells = tr.querySelectorAll("td");
+        if (cells.length <= Math.max(cName, cQty, cUsed, cNet)) continue;
+        const name = cells[cName].textContent.trim();
+        if (!name) continue;
+        byName[name.toLowerCase()] = {
+          name,
+          qty: cellNumber(cells[cQty].textContent),
+          used: cellNumber(cells[cUsed].textContent),
+          net: cellNumber(cells[cNet].textContent)
+        };
+      }
+      return { byName, at: /* @__PURE__ */ new Date() };
+    }
+    throw new Error("Could not find the Resources table on the Overview page.");
+  }
+  async function fetchResourceStats(core2) {
+    return parseResourceStats(await core2.http.getDoc("overview.php"));
+  }
+
   // src/ui/marketplace.js
   var SIDES = [
     { side: "sell", label: "Sell Orders", hint: "Listings from sellers — buy from them here." },
@@ -315,6 +380,13 @@
       const el = core2.el.bind(core2);
       const mode = parseMode(document);
       const hostKind = kindFromLocation(location);
+      core2.settings.define({
+        key: "market.sellMaxNegativeNetConfirm",
+        label: 'Confirm "Sell Max" when net production is negative',
+        description: "Ask for confirmation before Sell Max empties a stockpile whose per-tick net production is negative (i.e. one you are draining every tick).",
+        type: "bool",
+        default: true
+      });
       const adapters = {
         sell: createMarketAdapter(core2, "sell", mode, hostKind === "sell" ? document : null),
         buyer: createMarketAdapter(core2, "buyer", mode, hostKind === "buyer" ? document : null)
@@ -339,6 +411,8 @@
         favs: /* @__PURE__ */ new Set(),
         friendly: { sell: {}, buyer: {} },
         // resourceId -> {amount, count}
+        upkeep: null,
+        // resource stats from overview.php
         showHelp: false
       };
       try {
@@ -427,6 +501,60 @@
         if (resourceId) load(resourceId).then(sweepFavourites);
         else sweepFavourites();
       };
+      const upkeepFor = (resourceId) => state.upkeep ? state.upkeep.byName[resourceName(resourceId).toLowerCase()] || null : null;
+      let upkeepFetching = false;
+      async function maybeFetchUpkeep() {
+        if (mode || state.upkeep || upkeepFetching) return;
+        upkeepFetching = true;
+        try {
+          state.upkeep = await fetchResourceStats(core2);
+          updateSellMaxUi();
+        } catch (e) {
+          console.warn("[CLOP-US] upkeep fetch failed:", e);
+        } finally {
+          upkeepFetching = false;
+        }
+      }
+      async function sellMax(order, expected, btn) {
+        if (state.busy) return;
+        setBusy(true);
+        btn.textContent = "⟳ Verifying upkeep…";
+        const name = resourceName(order.resourceId);
+        try {
+          const stats = await fetchResourceStats(core2);
+          state.upkeep = stats;
+          const fresh = stats.byName[name.toLowerCase()];
+          if (!fresh || fresh.used !== expected.used) {
+            state.messages = {
+              errors: [`Not sold: the upkeep of ${name} changed — used to be ${core2.commas(expected.used)}, now it's ${fresh ? core2.commas(fresh.used) : "unknown"}. Check the numbers and try again if you're happy.`],
+              infos: []
+            };
+            return;
+          }
+          const freshMax = Math.min(fresh.qty - fresh.used, order.amount);
+          if (freshMax !== expected.n) {
+            state.messages = {
+              errors: [`Not sold: your ${name} stock changed — Sell Max would now sell ${core2.commas(Math.max(0, freshMax))} instead of ${core2.commas(expected.n)}. Check the numbers and try again if you're happy.`],
+              infos: []
+            };
+            return;
+          }
+          if (fresh.net < 0 && core2.settings.get("market.sellMaxNegativeNetConfirm")) {
+            const ok = window.confirm(
+              `Your net ${name} production is NEGATIVE (${core2.commas(fresh.net)}/tick) — you are draining this stockpile every tick.
+
+Sell ${core2.commas(expected.n)} anyway?`
+            );
+            if (!ok) return;
+          }
+          merge(await adapter().takeOrder(order, String(expected.n)));
+        } catch (e) {
+          state.messages = { errors: [String(e.message || e)], infos: [] };
+        } finally {
+          setBusy(false);
+          render();
+        }
+      }
       function switchSide(side) {
         if (state.busy || side === state.side) return;
         state.side = side;
@@ -440,6 +568,7 @@
         } catch (e) {
         }
         render();
+        if (side === "buyer") maybeFetchUpkeep();
         loadAndSweep(state.activeId);
       }
       core2.addStyle(`
@@ -660,10 +789,10 @@
         }
         const thead = el("thead", {}, [el("tr", {}, (state.side === "sell" ? ["Unit Price", "Units Available", "Seller", "Actions"] : ["Offering", "Amount Wanted", "Buyer", "Actions"]).map((h) => el("th", {}, [h])))]);
         const tbody = el("tbody");
-        for (const order of state.orders) tbody.appendChild(renderOrderRow(order));
+        state.orders.forEach((order, idx) => tbody.appendChild(renderOrderRow(order, idx)));
         return el("table", { class: "table table-striped table-bordered table-condensed" }, [thead, tbody]);
       }
-      function renderOrderRow(order) {
+      function renderOrderRow(order, idx) {
         const sell = state.side === "sell";
         const priceCell = el("td", {}, [el("span", { class: "text-danger" }, [core2.commas(order.price)])]);
         const unit = (mult) => core2.commas(Math.floor(order.price * mult));
@@ -705,17 +834,8 @@
             type: "button",
             onclick: () => run(() => adapter().takeOrder(order, "one"))
           }, ["Sell One"]));
-          const have = ownedAmount(order.resourceId);
-          const sellAll = el("button", {
-            class: "btn btn-warning btn-sm",
-            type: "button",
-            onclick: () => run(() => adapter().takeOrder(order, "all"))
-          }, [`Sell All (${total(state.mult.sell)} bits)`]);
-          if (have < order.amount) {
-            sellAll.disabled = true;
-            sellAll.title = `You only have ${core2.commas(have)}`;
-          }
-          actions.appendChild(sellAll);
+          actions.appendChild(sellAllButton(order));
+          if (!mode) actions.appendChild(sellMaxButton(order));
           actions.appendChild(amountForm(
             "Sell:",
             "btn-success",
@@ -723,12 +843,67 @@
             (n) => `get ${core2.commas(Math.floor(order.price * n * state.mult.sell))} bits`
           ));
         }
-        return el("tr", {}, [
+        return el("tr", { "data-idx": String(idx) }, [
           priceCell,
           el("td", {}, [el("span", { class: "text-success" }, [core2.commas(order.amount)])]),
           el("td", { html: order.ownerHtml }),
           el("td", {}, [actions])
         ]);
+      }
+      function sellAllButton(order) {
+        const have = ownedAmount(order.resourceId);
+        const up = upkeepFor(order.resourceId);
+        const bits = Math.floor(order.price * order.amount * state.mult.sell);
+        const btn = el("button", {
+          class: "btn btn-warning btn-sm clop-sellall",
+          type: "button",
+          onclick: () => run(() => adapter().takeOrder(order, "all"))
+        }, [`Sell All (${core2.commas(bits)} bits)`]);
+        if (have < order.amount) {
+          btn.disabled = true;
+          btn.title = `You only have ${core2.commas(have)}`;
+        } else if (up && have - up.used < order.amount) {
+          btn.disabled = true;
+          btn.title = `Selling all ${core2.commas(order.amount)} would eat into your ${core2.commas(up.used)}/tick upkeep — use Sell Max`;
+        }
+        return btn;
+      }
+      function sellMaxButton(order) {
+        const have = ownedAmount(order.resourceId);
+        const up = upkeepFor(order.resourceId);
+        const btn = el("button", { class: "btn btn-info btn-sm clop-sellmax", type: "button" }, []);
+        if (!up) {
+          btn.textContent = "Sell Max (…)";
+          btn.disabled = true;
+          btn.title = state.upkeep ? "No upkeep data for this resource on the Overview page" : "Fetching upkeep from the Overview page…";
+          return btn;
+        }
+        const max = Math.min(have - up.used, order.amount);
+        if (max < 1) {
+          btn.textContent = "Sell Max";
+          btn.disabled = true;
+          btn.title = `Nothing to spare: you have ${core2.commas(have)} and use ${core2.commas(up.used)}/tick`;
+        } else if (have - up.used > order.amount) {
+          btn.textContent = `Sell Max (${core2.commas(max)}: ${core2.commas(Math.floor(order.price * max * state.mult.sell))} bits)`;
+          btn.disabled = true;
+          btn.title = `You can spare ${core2.commas(have - up.used)} — more than this whole order; use Sell All`;
+        } else {
+          btn.textContent = `Sell Max (${core2.commas(max)}: ${core2.commas(Math.floor(order.price * max * state.mult.sell))} bits)`;
+          btn.title = `Sell everything above your ${core2.commas(up.used)}/tick upkeep (${core2.commas(have)} − ${core2.commas(up.used)}); upkeep is re-verified before selling`;
+          btn.addEventListener("click", () => sellMax(order, { used: up.used, n: max }, btn));
+        }
+        return btn;
+      }
+      function updateSellMaxUi() {
+        if (state.side !== "buyer" || mode) return;
+        for (const tr of root.querySelectorAll("tr[data-idx]")) {
+          const order = state.orders[Number(tr.getAttribute("data-idx"))];
+          if (!order || order.own) continue;
+          const oldAll = tr.querySelector(".clop-sellall");
+          if (oldAll) oldAll.replaceWith(sellAllButton(order));
+          const oldMax = tr.querySelector(".clop-sellmax");
+          if (oldMax) oldMax.replaceWith(sellMaxButton(order));
+        }
       }
       function amountForm(label, btnClass, onAmount, preview) {
         const input = el("input", { class: "form-control input-sm", value: "1", type: "text" });
@@ -762,6 +937,7 @@
       hideStockMarketUi(content);
       content.insertBefore(root, stockUiInsertionPoint(content));
       render();
+      if (state.side === "buyer") maybeFetchUpkeep();
       if (state.activeId && !state.updatedAt) loadAndSweep(state.activeId);
       else sweepFavourites();
     }

@@ -38,6 +38,8 @@ src/
   adapters/
     market.js             everything that knows the server: token protocol,
                           POST vocabulary, HTML parsing, stock-page surgery
+    overview.js           overview.php scraping: per-resource stock / upkeep
+                          ("Used"/tick) / net production
   ui/
     marketplace.js        merged marketplace frontend (pure UI)
 dist/
@@ -132,6 +134,40 @@ are always visible; the "favourites only" toggle next to the DNA toggle hides
 everything else. The `(?)` link explains the semantics in-page and warns
 against favouriting too many markets (each one is an extra request per
 refresh).
+
+### Sell Max (buy orders, resources mode)
+
+Next to Sell All, each buy order gets **Sell Max (N: X bits)** — sell all
+spare stock, i.e. owned minus the per-tick "Used" upkeep from the Overview
+page's Resources table. The two buttons are mutually exclusive: Sell All is
+disabled when filling the whole order would eat into upkeep, Sell Max is
+disabled when your spare stock covers the whole order (Sell All is then the
+right tool); when spare stock exactly equals the order both are enabled
+(equivalent).
+
+Upkeep is fetched from `overview.php` once, when the buy-orders side first
+becomes active (buttons show a disabled placeholder until it arrives, then
+get patched in place). For safety, clicking Sell Max re-fetches the Overview
+(the button shows "⟳ Verifying upkeep…") and aborts with an explanatory error
+if the upkeep — or the resulting sale amount — no longer matches what the
+button promised (e.g. buildings built/destroyed or stock moved in another
+tab). If the resource's net production is negative, a confirmation dialog
+warns before selling; that check can be turned off via the
+`market.sellMaxNegativeNetConfirm` setting.
+
+### Settings registry
+
+`core.settings` is an internal registry of user-editable settings: modules
+declare theirs with `core.settings.define({key, label, description, type,
+default})` and read them with `core.settings.get(key)`; values persist in
+`localStorage` under `clopus.setting.<key>`. There is no settings UI yet —
+the registry exists so every toggleable behavior is already declared and
+enumerable (`core.settings.all()`, also reachable from the console via
+`CLOPUS.settings`) when one is built. Current settings:
+
+| key                                | type | default | meaning |
+|------------------------------------|------|---------|---------|
+| `market.sellMaxNegativeNetConfirm` | bool | true    | confirm Sell Max when net production is negative |
 
 ## Server protocol notes (from the reference PHP source)
 

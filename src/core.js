@@ -88,6 +88,39 @@ export const core = {
         return Number(n).toLocaleString('en-US');
     },
 
+    /* ---------------- settings ----------------
+     * Registry of user-editable settings.  Modules declare theirs with
+     * define() at init; a future settings UI will enumerate all() to build
+     * itself, so every toggleable behavior must be declared here even while
+     * no UI exists.  Values persist under clopus.setting.<key>. */
+
+    settings: {
+        _defs: new Map(),
+
+        // def: { key, label, description, type: 'bool', default }
+        define(def) {
+            this._defs.set(def.key, def);
+        },
+
+        all() {
+            return [...this._defs.values()];
+        },
+
+        get(key) {
+            const def = this._defs.get(key);
+            const raw = core.storage.get(`clopus.setting.${key}`);
+            if (raw === null) return def ? def.default : null;
+            if (def && def.type === 'bool') return raw === '1';
+            return raw;
+        },
+
+        set(key, value) {
+            const def = this._defs.get(key);
+            const raw = def && def.type === 'bool' ? (value ? '1' : '0') : String(value);
+            core.storage.set(`clopus.setting.${key}`, raw);
+        },
+    },
+
     /* ---------------- storage ---------------- */
 
     storage: {
