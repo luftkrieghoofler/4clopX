@@ -1,293 +1,66 @@
 # CLOP Dynamic UI userscript
 
-A userscript that progressively replaces parts of the CLOP web UI with a
-dynamic, fetch-based client. The server code is not modified; the script talks
-to the existing PHP endpoints and parses their HTML responses, so it works
-against the live instance even where values (prices, resources, multipliers)
-differ from the reference source — everything is read from the pages, nothing
-is hardcoded.
+A userscript for [CLOP](https://4clop.org) that replaces the marketplace with
+a dynamic single-page UI and adds optional auto-login.
 
-## Build & install
+## Install
 
-```sh
-npm install        # once; installs esbuild
-npm run build      # src/ -> dist/clop.user.js
-npm run watch      # rebuild on every source change
-```
+Install a userscript manager (Violentmonkey, Tampermonkey, or Greasemonkey),
+then install
+[`clop.user.js` from the latest release](https://github.com/luftkrieghoofler/4clopX/releases/latest/download/clop.user.js).
+Updates arrive through the manager's normal update check. To build from
+source instead, see [DEVELOPMENT.md](DEVELOPMENT.md).
 
-Load `dist/clop.user.js` into Violentmonkey / Tampermonkey. It matches
-`https://4clop.org/*` and `https://*.4clop.org/*`; add a `@match` line in
-`src/meta.txt` for the docker-compose dev instance or any other host. The
-script requires the `GM_getValue`/`GM_setValue`/`GM_deleteValue` grants (for
-credential storage), which means it runs in the manager's sandbox; the
-`CLOPUS` debug handle is still exported to the page window via
-`unsafeWindow`.
+## What changes
 
-Dev loop: run `npm run watch`, and in Violentmonkey install the script from
-`file:///…/dist/clop.user.js` — it offers to track the file, so a page reload
-picks up every rebuild. (Tampermonkey can do the same if you enable "Allow
-access to file URLs" for the extension in the browser.)
+Marketplace (resources, weapons, and armor modes):
 
-## Project layout
+- Sell orders and buy orders become one page with two tabs. Switching sides,
+  switching resources, buying, selling, placing and removing orders all
+  happen in place, without page loads. The stock menu entries still work and
+  open the side they always led to.
+- No more "Try again." on refresh; there is a proper Refresh button.
+- Resource tabs show how much of each resource you own, with a toggle to
+  hide DNA resources and one to show favourites only.
+- Prices are shown as what you'll actually pay or receive (your economic-type
+  multipliers applied), including live totals for Buy All / Sell All and
+  custom amounts.
+- When selling to buy orders, your upkeep is protected: **Sell All** is
+  disabled when filling the order would cut into it, and a **Sell Max**
+  button sells exactly your spare stock instead.
+- Tabs can show how much alliance mates and friends are trading in each
+  market you mark as a ★ favourite.
+- The last-viewed resource is remembered per side.
 
-```
-build.mjs                 esbuild bundling: ESM in, one IIFE userscript out
-src/
-  meta.txt                the ==UserScript== header (single source of truth,
-                          prepended verbatim; @version injected into the code)
-  main.js                 entry point: registers modules, boots
-  core.js                 module registry, serialized HTTP queue, DOM/storage
-                          helpers — no page-specific knowledge
-  adapters/
-    market.js             everything that knows the server: token protocol,
-                          POST vocabulary, HTML parsing, stock-page surgery
-    overview.js           overview.php scraping: per-resource stock / upkeep
-                          ("Used"/tick) / net production
-    session.js            login.php protocol + logged-in/login-form detection
-  ui/
-    marketplace.js        merged marketplace frontend (pure UI)
-    autologin.js          auto re-login on session expiry, return-to-page
-dist/
-  clop.user.js            build output — the file you install
-```
+Auto-login (opt-in): when the game expires your session, the script logs you
+back in and takes you to the page you were trying to open instead of the
+login screen.
 
-Userscript managers can't load ES modules from disk, so multi-file userscripts
-are bundled; esbuild is the light way to do it (the heavier ecosystem options
-are `vite-plugin-monkey` / `webpack-userscript`, which add dev-server
-hot-reload and header management — worth it if this grows a lot).
+## Notes
 
-## Architecture: adapter vs frontend
+**Favourite markets.** A badge like `[68(2)]` on a resource tab means
+alliance mates (green names) and friends (blue names) have 2 open orders
+totalling 68 units in that market, on the current side. Keeping a badge up
+to date costs one extra request per refresh, so badges are only maintained
+for the market you have open plus the ones you star as favourites — star the
+few you actually watch. Favourite tabs also stay visible when the
+DNA-hiding or favourites-only filters are on. The `(?)` link next to the
+star explains the details in-page.
 
-The code is split so that the two likely kinds of change stay isolated:
+**Sell All / Sell Max.** The script reserves your upkeep — the per-tick
+"Used" amounts from the Overview plus the military's 12-hour resource
+consumption — when selling into buy orders. Sell All is disabled when
+filling the whole order would eat into that reserve; Sell Max sells only
+your spare stock, and is disabled when the spare stock covers the entire
+order (Sell All then does the same thing). Sell Max re-checks the Overview
+when clicked and aborts if the numbers have changed in the meantime.
 
-- **`src/adapters/market.js`** is the only file that knows the site. It owns
-  the token bookkeeping, the form-field vocabulary of both marketplace
-  endpoints, all HTML parsing, and the "hide the stock widgets" surgery. If
-  the site's markup drifts, the `parse*` functions here are the only thing to
-  fix. If the dev ever ships a real API, a second adapter implementing the
-  same interface replaces this one and the UI is untouched.
-- **`src/ui/*.js`** never touches server HTML. The marketplace frontend calls
-  the adapter interface and renders `MarketSnapshot` objects.
-
-The adapter interface (one adapter instance per market side × mode):
-
-```js
-adapter = createMarketAdapter(core, kind /* 'sell'|'buyer' */, mode, seedDoc?)
-adapter.ready()                              // ensure a token is held (GET-seeds if needed)
-adapter.snapshotFromDocument(doc)            // boot state from the hosting page, no network
-adapter.load(resourceId)                     // -> MarketSnapshot
-adapter.createOrder(resourceId, amount, price)
-adapter.takeOrder(order, 'one'|'all'|'<n>')  // buy from a listing / sell to an offer
-adapter.cancelOrder(order)
-```
-
-```js
-MarketSnapshot = {
-  kind: 'sell'|'buyer',
-  resourceId,                  // which resource `orders` belongs to
-  funds,                       // display string
-  mult: {buy, sell} | null,    // your economic-type multipliers
-  resources: [{id, name, have, selected}],
-  orders: [{resourceId, counterpartyId, price, amount, own, ownerHtml,
-            relation /* 'friend'|'enemy'|'alliance'|null, from the server's
-                        name styling; friend overrides alliance */}],
-  messages: {errors: [html], infos: [html]},
-}
-```
-
-## The merged marketplace
-
-`marketplace.php` and `buyermarketplace.php` (plus their weapons/armor modes)
-are now one UI with two top-level tabs, **Sell Orders** (listings you can buy
-from) and **Buy Orders** (offers you can sell to). The stock Capitalism menu
-items are left alone: both pages host the same UI, opened on the side the
-visited page corresponds to, so the "Buyer's ..." entries still take you
-straight to the buy side.
-
-There is no custom "root page", because the script still needs a
-server-rendered shell (session, header, nav) to live in. Switching sides never
-navigates: the other endpoint is driven by its own adapter, and
-`history.replaceState` swaps the URL between the two stock paths so refresh
-and bookmarks land on the view you were on. The non-host side's token is
-seeded lazily with one GET the first time you switch to it.
-
-Features carried over from the single-page version: resource tabs with owned
-counts and a DNA show/hide toggle, Refresh, dynamic buy/sell/place/remove,
-effective-price hints (per-unit, own-order "each / for all", Buy All / Sell
-All totals, live previews on custom amounts), Sell All disabled when you own
-too few, last-viewed resource remembered per side and mode.
-
-### Alliance/friend badges & favourite markets
-
-Tabs can carry a `[total(orders)]` badge counting the open orders of alliance
-mates and friends on the current side — e.g. `Apples (48) [68(2)]`: you own
-48, and two green/blue-named players are trading 68 in total. "Friendly" means
-the server's own name styling: green (`text-success`) is alliance,
-blue (`text-info`) is friends — and since friend styling *overrides* alliance
-styling server-side, both colors are counted so alliance mates you've
-friended aren't missed. Own orders are excluded.
-
-Counting a market costs one POST, so badges are only maintained for markets
-you mark as **★ favourites** (button next to the place/offer form, stored per
-mode) plus the currently open market (whose counts come free with every
-response). Favourites are re-fetched — one request each, through the same
-serialized queue — on page load, Refresh, and side switches; market tab
-clicks deliberately don't sweep (opening a market refreshes its own badge
-anyway, and an explicit Refresh covers the rest). A newer sweep or side
-switch aborts an older one, and there is deliberately no caching. Favourite tabs (DNA ones included)
-are always visible; the "favourites only" toggle next to the DNA toggle hides
-everything else. The `(?)` link explains the semantics in-page and warns
-against favouriting too many markets (each one is an extra request per
-refresh).
-
-### Sell Max (buy orders, resources mode)
-
-Next to Sell All, each buy order gets **Sell Max (N: X bits)** — sell all
-spare stock, i.e. owned minus a reserve of the per-tick "Used" upkeep from
-the Overview page's Resources table **plus** the military's separate 12-hour
-consumption (apples/gems/coffee/gasoline, parsed from the line under that
-table; reserved in full since it lands as a lump, not per tick). The two
-buttons are mutually exclusive: Sell All is
-disabled when filling the whole order would eat into the reserve, Sell Max is
-disabled when your spare stock covers the whole order (Sell All is then the
-right tool); when spare stock exactly equals the order both are enabled
-(equivalent).
-
-Upkeep is fetched from `overview.php` once, when the buy-orders side first
-becomes active (buttons show a disabled placeholder until it arrives, then
-get patched in place). For safety, clicking Sell Max re-fetches the Overview
-(the button shows "⟳ Verifying upkeep…") and aborts with an explanatory error
-if the upkeep — or the resulting sale amount — no longer matches what the
-button promised (e.g. buildings built/destroyed or stock moved in another
-tab). If the resource's net production is negative, a confirmation dialog
-warns before selling; that check can be turned off via the
-`market.sellMaxNegativeNetConfirm` setting.
-
-### Settings registry
-
-`core.settings` is an internal registry of user-editable settings: modules
-declare theirs with `core.settings.define({key, label, description, type,
-default})` and read them with `core.settings.get(key)`; values persist in
-`localStorage` under `clopus.setting.<key>`. There is no settings UI yet —
-the registry exists so every toggleable behavior is already declared and
-enumerable (`core.settings.all()`, also reachable from the console via
-`CLOPUS.settings`) when one is built. Current settings:
-
-| key                                | type | default | meaning |
-|------------------------------------|------|---------|---------|
-| `market.sellMaxNegativeNetConfirm` | bool | true    | confirm Sell Max when net production is negative |
-| `autologin.enabled`                | bool | true    | log back in automatically when the session expires |
-
-## Auto-login
-
-The game expires sessions frequently, bouncing you to the login screen with
-a plain `Location: index.php` redirect (the URL you wanted is lost
-server-side). The autologin module fixes both halves:
-
-- **Opt-in**: a "Auto-login (remember credentials)" checkbox is added to the
-  stock login form. Ticked, a manual login stores the credentials;
-  unticked, it erases them. `CLOPUS.autologin.forget()` also erases them.
-- **Storage**: credentials live *only* in the userscript manager's
-  script-private storage (`core.secrets`, backed by `GM_setValue`). Page
-  scripts — including any XSS on the site — and other userscripts cannot
-  read it. There is deliberately no fallback to `localStorage`: without the
-  GM grants the feature turns itself off and says so on the login form.
-  (Disk-level exposure is the same as any browser storage; the manager
-  storage specifically removes the same-origin/XSS attack surface.)
-- **Return-to-page**: on every logged-in page the module records the page
-  URL, and a capture-phase listener records each same-origin link click
-  *before* navigation. After a successful re-login it `location.replace`s
-  to the recently-clicked link (if <60s old), else the last logged-in page,
-  else overview.php — so the login page never enters history.
-- **Lockout safety**: the server rate-limits *failed* logins (>20/IP/2h),
-  so a "Login incorrect." response permanently disables auto-login (flag on
-  the stored credentials) until a manual login with the checkbox re-saves
-  them; other failures don't retry; attempts are throttled to one per 30s
-  per tab; and a fresh logout click suppresses auto-login entirely so
-  logging out stays possible.
-
-## Server protocol notes (from the reference PHP source)
-
-Relevant files: `backend/backend_marketplace.php`, `backend/backend_buyermarketplace.php`.
-
-### The token
-
-`$_SESSION["token_<market>"]` is a single-use anti-double-submit token, one per
-market table (`marketplace`, `weaponsmarketplace`, `armormarketplace`, and the
-three `*buyermarketplace` variants — so the two sides/three modes never clash
-with each other):
-
-- every POST must send it as `token_<market>`;
-- **every POST rotates it** to `sha1(rand() . old)`, even when validation
-  fails; a GET only creates it if missing;
-- every rendered page embeds the current token in its forms' hidden inputs.
-
-This explains the old UI's quirks:
-
-- browser refresh re-POSTs the already-consumed token → "Try again.";
-- a plain GET shows no orders at all, because the deals query runs only
-  `if ($_POST)`.
-
-Consequences the adapter exploits:
-
-- "loading" a market = POST `{token, mode, resource_id}` with no action verb;
-- after any POST it harvests the fresh token from the response, enabling
-  unlimited chained requests and a real Refresh button;
-- a GET seeds the token for a market the user hasn't visited this session
-  (used for the non-host side of the merged UI);
-- on "Try again." (e.g. a second browser tab consumed the token) nothing was
-  executed server-side (all mutations sit inside `if (!$errors)`), and the
-  error response already carries the *new* token — so the adapter
-  transparently retries once.
-
-### Request vocabulary
-
-Common fields: `token_<market>`, `mode` (`""` | `weapons` | `armor`), `resource_id`.
-
-`marketplace.php` (submit name is always `action`):
-
-| action                    | extra fields                          |
-|---------------------------|---------------------------------------|
-| *(none — just list)*      | —                                     |
-| `Place on Market`         | `amount`, `price`                     |
-| `Buy One` / `Buy All`     | `buyingfrom_id`, `price`              |
-| `Buy:`                    | `buyingfrom_id`, `price`, `buyingamount` |
-| `Remove from Marketplace` | `buyingfrom_id`, `price`              |
-
-`buyermarketplace.php` (distinct submit names):
-
-| field=value                      | extra fields                          |
-|----------------------------------|---------------------------------------|
-| *(none — just list)*             | —                                      |
-| `offer=Offer to Buy`             | `amount`, `price` (funds escrowed immediately) |
-| `sellone=Sell One` / `sellall=Sell All` | `sellingto_id`, `price`         |
-| `sellamount=Sell:`               | `sellingto_id`, `price`, `sellingamount` |
-| `remove=Remove from Marketplace` | `sellingto_id`, `price` (escrow refunded) |
-
-Orders are keyed server-side by `(nation_id, resource_id, price)` — that's why
-rows carry the counterparty nation id and unit price rather than an order id.
-
-### Response parsing
-
-Responses are full HTML pages; the adapter extracts:
-
-- fresh token: `input[name^="token_"]`;
-- funds: the `.well` containing "Funds:";
-- alerts: `.alert-danger div.error` / `.alert-info div.info` (the static
-  economic-type alert has no `div.info` children, which is how it's told apart);
-- order rows: hidden inputs of each row's form (exact `resource_id`,
-  counterparty id, raw `price`) + the `viewnation.php` anchor kept as-is so the
-  server's friend/enemy/alliance coloring and region icons carry over; the
-  coloring classes inside that anchor also yield each order's `relation`
-  (`text-info` friend / `text-danger` enemy / `text-success` alliance —
-  checked in the server's own precedence order);
-- resource list + "Have" counts: the (hidden) `select[name=resource_id]` options.
-
-A response with no `token_` input means the session died; the adapter surfaces
-"reload and log in" instead of retrying.
-
-## Adding a module
-
-Create `src/ui/<name>.js` exporting `{name, matches(page, location), init(core)}`,
-register it in `src/main.js`, rebuild. If it needs new server interactions,
-give it an adapter in `src/adapters/` and keep the parsing there.
+**Auto-login.** Tick "Auto-login (remember credentials)" on the login form
+to enable it; logging in with it unticked erases the stored credentials.
+They are kept in the userscript manager's script-private storage, which site
+scripts (including any XSS on the site) cannot read — but on disk they are
+unencrypted, like most browser-stored data. That's probably fine, but bear
+it in mind if you're security-minded or already use a password manager.
+After a "Login incorrect." response the feature disables itself (the server
+rate-limits failed logins) until you log in manually with the checkbox
+ticked again.
