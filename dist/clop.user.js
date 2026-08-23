@@ -175,13 +175,20 @@
       for (const inp of form.querySelectorAll('input[type="hidden"]')) hidden[inp.name] = inp.value;
       const owner = tr.querySelector('a[href*="viewnation.php"]');
       const amount = tr.querySelector("p.text-success");
+      let relation = null;
+      if (owner) {
+        if (owner.querySelector(".text-info")) relation = "friend";
+        else if (owner.querySelector(".text-danger")) relation = "enemy";
+        else if (owner.querySelector(".text-success")) relation = "alliance";
+      }
       orders.push({
         resourceId: hidden.resource_id,
         counterpartyId: hidden.buyingfrom_id || hidden.sellingto_id,
         price: parseInt(hidden.price, 10),
         amount: amount ? parseInt(amount.textContent.trim(), 10) : 0,
         own: !!tr.querySelector('input[type="submit"][value="Remove from Marketplace"]'),
-        ownerHtml: owner ? owner.outerHTML : "?"
+        ownerHtml: owner ? owner.outerHTML : "?",
+        relation
       });
     }
     return orders;
@@ -314,6 +321,8 @@
       };
       const lastKey = (side) => `clopus.market.last.${side}.${mode || "resources"}`;
       const SHOW_DNA_KEY = "clopus.market.showDna";
+      const FAVS_KEY = `clopus.market.favs.${mode || "resources"}`;
+      const FAVS_ONLY_KEY = "clopus.market.favsOnly";
       const state = {
         side: hostKind,
         // 'sell' | 'buyer'
@@ -325,8 +334,18 @@
         messages: { errors: [], infos: [] },
         updatedAt: null,
         busy: false,
-        showDna: core2.storage.get(SHOW_DNA_KEY, "0") === "1"
+        showDna: core2.storage.get(SHOW_DNA_KEY, "0") === "1",
+        favsOnly: core2.storage.get(FAVS_ONLY_KEY, "0") === "1",
+        favs: /* @__PURE__ */ new Set(),
+        friendly: { sell: {}, buyer: {} },
+        // resourceId -> {amount, count}
+        showHelp: false
       };
+      try {
+        state.favs = new Set(JSON.parse(core2.storage.get(FAVS_KEY, "[]")));
+      } catch (e) {
+      }
+      const saveFavs = () => core2.storage.set(FAVS_KEY, JSON.stringify([...state.favs]));
       const boot = adapters[hostKind].snapshotFromDocument(document);
       state.funds = boot.funds;
       if (boot.mult) state.mult = boot.mult;
@@ -334,6 +353,7 @@
       state.orders = boot.orders;
       if (boot.resourceId) {
         state.activeId = boot.resourceId;
+        state.friendly[hostKind][boot.resourceId] = summarizeFriendly(boot.orders);
         if (boot.orders.length || marketIsEmpty(document)) state.updatedAt = /* @__PURE__ */ new Date();
       } else {
         const remembered = core2.storage.get(lastKey(hostKind));
@@ -348,6 +368,16 @@
         return r ? r.have : 0;
       }
       const isDna = (name) => /^DNA/i.test(name);
+      function summarizeFriendly(orders) {
+        let amount = 0, count = 0;
+        for (const o of orders) {
+          if (!o.own && (o.relation === "alliance" || o.relation === "friend")) {
+            amount += o.amount;
+            count += 1;
+          }
+        }
+        return { amount, count };
+      }
       const adapter = () => adapters[state.side];
       function merge(snap) {
         state.orders = snap.orders;
@@ -357,6 +387,7 @@
         state.messages = snap.messages;
         if (snap.resourceId) {
           state.activeId = snap.resourceId;
+          state.friendly[snap.kind][snap.resourceId] = summarizeFriendly(snap.orders);
           core2.storage.set(lastKey(snap.kind), snap.resourceId);
         }
         state.updatedAt = /* @__PURE__ */ new Date();
@@ -374,6 +405,28 @@
         }
       }
       const load = (resourceId) => run(() => adapter().load(resourceId));
+      let sweepSeq = 0;
+      async function sweepFavourites() {
+        const seq = ++sweepSeq;
+        const side = state.side;
+        const targets = [...state.favs].filter((id) => id !== state.activeId && state.resources.some((r) => r.id === id));
+        for (const id of targets) {
+          if (seq !== sweepSeq || state.side !== side) return;
+          try {
+            const snap = await adapters[side].load(id);
+            state.friendly[side][id] = summarizeFriendly(snap.orders);
+            if (snap.resources.length) state.resources = snap.resources;
+            updateBadges();
+          } catch (e) {
+            console.warn("[CLOP-US] favourites sweep stopped:", e);
+            return;
+          }
+        }
+      }
+      const loadAndSweep = (resourceId) => {
+        if (resourceId) load(resourceId).then(sweepFavourites);
+        else sweepFavourites();
+      };
       function switchSide(side) {
         if (state.busy || side === state.side) return;
         state.side = side;
@@ -387,7 +440,7 @@
         } catch (e) {
         }
         render();
-        if (state.activeId) load(state.activeId);
+        loadAndSweep(state.activeId);
       }
       core2.addStyle(`
             #clop-market-root .clop-side-tabs { margin-bottom: 12px; }
@@ -405,8 +458,13 @@
             #clop-market-root .clop-amount-note { white-space: nowrap; }
             #clop-market-root .clop-tabsbar { display: flex; align-items: flex-start; gap: 10px; }
             #clop-market-root .clop-tabsbar .clop-tabs { flex: 1; }
-            #clop-market-root .clop-dna-toggle { white-space: nowrap; font-weight: normal; cursor: pointer; margin: 12px 0 0 0; }
-            #clop-market-root .clop-dna-toggle input { margin-right: 4px; }
+            #clop-market-root .clop-filter-toggle { white-space: nowrap; font-weight: normal; cursor: pointer; margin: 12px 0 0 0; }
+            #clop-market-root .clop-filter-toggle input { margin-right: 4px; }
+            #clop-market-root .clop-help { cursor: pointer; margin-top: 12px; }
+            #clop-market-root .clop-friendly-badge { margin-left: 6px; }
+            #clop-market-root .clop-form-row { display: flex; align-items: flex-start; gap: 10px; }
+            #clop-market-root .clop-form-row .clop-place { flex: 1; }
+            #clop-market-root .clop-form-row > button { margin-top: 8px; white-space: nowrap; }
             #clop-market-root.clop-busy .clop-action { pointer-events: none; opacity: .55; }
             #clop-market-root .clop-updated { font-size: 85%; }
         `);
@@ -435,9 +493,7 @@
           el("button", {
             class: "btn btn-default btn-sm clop-action",
             type: "button",
-            onclick: () => {
-              if (state.activeId) load(state.activeId);
-            }
+            onclick: () => loadAndSweep(state.activeId)
           }, ["⟳ Refresh"])
         ]));
         for (const [cls, list] of [["danger", state.messages.errors], ["info", state.messages.infos]]) {
@@ -454,16 +510,44 @@
           }
         }
         const hasDna = state.resources.some((r) => isDna(r.name));
-        const visible = state.resources.filter((r) => state.showDna || !isDna(r.name) || r.id === state.activeId);
+        const visible = state.resources.filter((r) => r.id === state.activeId || state.favs.has(r.id) || !state.favsOnly && (state.showDna || !isDna(r.name)));
         const tabs = el("ul", { class: "nav nav-pills clop-tabs" });
         for (const r of visible) {
           const label = r.have ? `${r.name} (${core2.commas(r.have)})` : r.name;
           const a = el("a", { onclick: () => load(r.id) }, [label]);
-          tabs.appendChild(el("li", { class: r.id === state.activeId ? "active clop-action" : "clop-action" }, [a]));
+          const badge = badgeFor(r.id);
+          if (badge) a.appendChild(badge);
+          tabs.appendChild(el("li", {
+            class: r.id === state.activeId ? "active clop-action" : "clop-action",
+            "data-rid": r.id
+          }, [a]));
+        }
+        if (!visible.length) {
+          tabs.appendChild(el("li", { class: "text-muted" }, [
+            el("a", {}, ["No favourite markets yet — open one and hit ☆."])
+          ]));
         }
         const tabsBar = el("div", { class: "clop-tabsbar" }, [tabs]);
-        if (hasDna) {
-          const cb = el("input", {
+        const favsCb = el("input", {
+          type: "checkbox",
+          onchange: (ev) => {
+            state.favsOnly = ev.target.checked;
+            core2.storage.set(FAVS_ONLY_KEY, state.favsOnly ? "1" : "0");
+            render();
+          }
+        });
+        favsCb.checked = state.favsOnly;
+        tabsBar.appendChild(el("label", { class: "text-muted clop-filter-toggle" }, [favsCb, " favourites only"]));
+        tabsBar.appendChild(el("a", {
+          class: "clop-help clop-action",
+          title: "Favourite markets are re-fetched on refresh to count alliance/friend orders. Click for details.",
+          onclick: () => {
+            state.showHelp = !state.showHelp;
+            render();
+          }
+        }, ["(?)"]));
+        if (!state.favsOnly && hasDna) {
+          const dnaCb = el("input", {
             type: "checkbox",
             onchange: (ev) => {
               state.showDna = ev.target.checked;
@@ -471,16 +555,65 @@
               render();
             }
           });
-          cb.checked = state.showDna;
-          tabsBar.appendChild(el("label", { class: "text-muted clop-dna-toggle" }, [cb, " show DNA"]));
+          dnaCb.checked = state.showDna;
+          tabsBar.appendChild(el("label", { class: "text-muted clop-filter-toggle" }, [dnaCb, " show DNA"]));
         }
         root.appendChild(tabsBar);
+        if (state.showHelp) {
+          const help = el("div", { class: "alert alert-info" });
+          help.appendChild(el("button", {
+            class: "close",
+            type: "button",
+            html: "&times;",
+            onclick: () => {
+              state.showHelp = false;
+              render();
+            }
+          }));
+          help.appendChild(el("span", {}, [
+            "Tab badges count the open orders of your alliance mates and friends (the green/blue names) on this side of the market: 68(2) means two of them are trading 68 units in total. Only ★ favourite markets and the currently open one are counted. Each favourite costs one extra server request on every load and view change, so try not to spam the server."
+          ]));
+          root.appendChild(help);
+        }
         if (!state.activeId) {
           root.appendChild(el("div", { class: "alert alert-info" }, ["Pick a resource above to view its market."]));
           return;
         }
-        root.appendChild(renderPlaceForm());
+        root.appendChild(el("div", { class: "clop-form-row" }, [renderPlaceForm(), favButton()]));
         root.appendChild(renderOrders());
+      }
+      function badgeFor(id) {
+        if (id !== state.activeId && !state.favs.has(id)) return null;
+        const f = state.friendly[state.side][id];
+        if (!f || !f.count) return null;
+        const what = state.side === "sell" ? "selling" : "buying";
+        return el("span", {
+          class: "badge clop-friendly-badge",
+          title: `${f.count} alliance/friend order${f.count === 1 ? "" : "s"} ${what} ${core2.commas(f.amount)} total`
+        }, [`${core2.commas(f.amount)} (${f.count})`]);
+      }
+      function updateBadges() {
+        for (const li of root.querySelectorAll(".clop-tabs li[data-rid]")) {
+          const a = li.querySelector("a");
+          const old = a.querySelector(".clop-friendly-badge");
+          if (old) old.remove();
+          const badge = badgeFor(li.getAttribute("data-rid"));
+          if (badge) a.appendChild(badge);
+        }
+      }
+      function favButton() {
+        const fav = state.favs.has(state.activeId);
+        return el("button", {
+          class: `btn btn-sm ${fav ? "btn-warning" : "btn-default"} clop-action`,
+          type: "button",
+          title: fav ? "Stop counting alliance/friend orders for this market" : "Count alliance/friend orders for this market on every load and refresh",
+          onclick: () => {
+            if (fav) state.favs.delete(state.activeId);
+            else state.favs.add(state.activeId);
+            saveFavs();
+            render();
+          }
+        }, [fav ? "★ Unfavourite Market" : "☆ Favourite Market"]);
       }
       function renderPlaceForm() {
         const sell = state.side === "sell";
@@ -629,7 +762,8 @@
       hideStockMarketUi(content);
       content.insertBefore(root, stockUiInsertionPoint(content));
       render();
-      if (state.activeId && !state.updatedAt) load(state.activeId);
+      if (state.activeId && !state.updatedAt) loadAndSweep(state.activeId);
+      else sweepFavourites();
     }
   };
 

@@ -13,9 +13,15 @@
 //     funds:      string | null,     // display string, e.g. "1,234,567"
 //     mult:       { buy, sell } | null,  // your economic-type multipliers
 //     resources:  [{ id, name, have, selected }],
-//     orders:     [{ resourceId, counterpartyId, price, amount, own, ownerHtml }],
+//     orders:     [{ resourceId, counterpartyId, price, amount, own,
+//                    ownerHtml, relation }],
 //     messages:   { errors: [html], infos: [html] },
 //   }
+//
+// `relation` is 'friend' | 'enemy' | 'alliance' | null, read from the
+// server's own name styling (text-info / text-danger / text-success).  Note
+// the server checks in that order, so a friend who is also an alliance mate
+// reports 'friend', not 'alliance'.
 //
 // If the site ever grows a real API, implement the same interface
 // (ready / snapshotFromDocument / load / createOrder / takeOrder /
@@ -118,6 +124,12 @@ function parseOrders(doc) {
         for (const inp of form.querySelectorAll('input[type="hidden"]')) hidden[inp.name] = inp.value;
         const owner = tr.querySelector('a[href*="viewnation.php"]');
         const amount = tr.querySelector('p.text-success');
+        let relation = null;
+        if (owner) {
+            if (owner.querySelector('.text-info')) relation = 'friend';
+            else if (owner.querySelector('.text-danger')) relation = 'enemy';
+            else if (owner.querySelector('.text-success')) relation = 'alliance';
+        }
         orders.push({
             resourceId: hidden.resource_id,
             counterpartyId: hidden.buyingfrom_id || hidden.sellingto_id,
@@ -125,6 +137,7 @@ function parseOrders(doc) {
             amount: amount ? parseInt(amount.textContent.trim(), 10) : 0,
             own: !!tr.querySelector('input[type="submit"][value="Remove from Marketplace"]'),
             ownerHtml: owner ? owner.outerHTML : '?',
+            relation,
         });
     }
     return orders;

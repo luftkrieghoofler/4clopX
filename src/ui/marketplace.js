@@ -44,6 +44,8 @@ export const marketplaceModule = {
         // sell and buy tabs each restore their own market.
         const lastKey = (side) => `clopus.market.last.${side}.${mode || 'resources'}`;
         const SHOW_DNA_KEY = 'clopus.market.showDna';
+        const FAVS_KEY = `clopus.market.favs.${mode || 'resources'}`;
+        const FAVS_ONLY_KEY = 'clopus.market.favsOnly';
 
         /* ---------------- state ---------------- */
 
@@ -58,7 +60,14 @@ export const marketplaceModule = {
             updatedAt: null,
             busy: false,
             showDna: core.storage.get(SHOW_DNA_KEY, '0') === '1',
+            favsOnly: core.storage.get(FAVS_ONLY_KEY, '0') === '1',
+            favs: new Set(),
+            friendly: { sell: {}, buyer: {} },     // resourceId -> {amount, count}
+            showHelp: false,
         };
+
+        try { state.favs = new Set(JSON.parse(core.storage.get(FAVS_KEY, '[]'))); } catch (e) { /* corrupt value */ }
+        const saveFavs = () => core.storage.set(FAVS_KEY, JSON.stringify([...state.favs]));
 
         const boot = adapters[hostKind].snapshotFromDocument(document);
         state.funds = boot.funds;
@@ -67,6 +76,7 @@ export const marketplaceModule = {
         state.orders = boot.orders;
         if (boot.resourceId) {
             state.activeId = boot.resourceId;
+            state.friendly[hostKind][boot.resourceId] = summarizeFriendly(boot.orders);
             if (boot.orders.length || marketIsEmpty(document)) state.updatedAt = new Date();
         } else {
             const remembered = core.storage.get(lastKey(hostKind));
@@ -85,6 +95,20 @@ export const marketplaceModule = {
 
         const isDna = (name) => /^DNA/i.test(name);
 
+        // Orders from alliance mates (green) or friends (blue), per the
+        // server's own styling; own orders excluded.  (Friend styling
+        // overrides alliance styling server-side, which is why both count.)
+        function summarizeFriendly(orders) {
+            let amount = 0, count = 0;
+            for (const o of orders) {
+                if (!o.own && (o.relation === 'alliance' || o.relation === 'friend')) {
+                    amount += o.amount;
+                    count += 1;
+                }
+            }
+            return { amount, count };
+        }
+
         /* ---------------- adapter plumbing ---------------- */
 
         const adapter = () => adapters[state.side];
@@ -97,6 +121,7 @@ export const marketplaceModule = {
             state.messages = snap.messages;
             if (snap.resourceId) {
                 state.activeId = snap.resourceId;
+                state.friendly[snap.kind][snap.resourceId] = summarizeFriendly(snap.orders);
                 core.storage.set(lastKey(snap.kind), snap.resourceId);
             }
             state.updatedAt = new Date();
@@ -117,6 +142,38 @@ export const marketplaceModule = {
 
         const load = (resourceId) => run(() => adapter().load(resourceId));
 
+        // Refresh the alliance/friend badge counts for all favourite markets
+        // on the current side — one POST per favourite (the open market is
+        // skipped; its counts come with every regular response).  There is
+        // deliberately no caching: this runs on boot, Refresh, and side
+        // switches only — a market tab click refreshes just the clicked
+        // market's own badge — and a newer sweep or a side switch aborts an
+        // older one.
+        let sweepSeq = 0;
+        async function sweepFavourites() {
+            const seq = ++sweepSeq;
+            const side = state.side;
+            const targets = [...state.favs]
+                .filter((id) => id !== state.activeId && state.resources.some((r) => r.id === id));
+            for (const id of targets) {
+                if (seq !== sweepSeq || state.side !== side) return; // superseded
+                try {
+                    const snap = await adapters[side].load(id);
+                    state.friendly[side][id] = summarizeFriendly(snap.orders);
+                    if (snap.resources.length) state.resources = snap.resources;
+                    updateBadges();
+                } catch (e) {
+                    console.warn('[CLOP-US] favourites sweep stopped:', e);
+                    return;
+                }
+            }
+        }
+
+        const loadAndSweep = (resourceId) => {
+            if (resourceId) load(resourceId).then(sweepFavourites);
+            else sweepFavourites();
+        };
+
         function switchSide(side) {
             if (state.busy || side === state.side) return;
             state.side = side;
@@ -130,7 +187,7 @@ export const marketplaceModule = {
             // Keep the URL aligned with the stock page for this side.
             try { history.replaceState(null, '', marketPageUrl(side, mode)); } catch (e) { /* ignore */ }
             render();
-            if (state.activeId) load(state.activeId);
+            loadAndSweep(state.activeId);
         }
 
         /* ---------------- UI ---------------- */
@@ -151,8 +208,13 @@ export const marketplaceModule = {
             #clop-market-root .clop-amount-note { white-space: nowrap; }
             #clop-market-root .clop-tabsbar { display: flex; align-items: flex-start; gap: 10px; }
             #clop-market-root .clop-tabsbar .clop-tabs { flex: 1; }
-            #clop-market-root .clop-dna-toggle { white-space: nowrap; font-weight: normal; cursor: pointer; margin: 12px 0 0 0; }
-            #clop-market-root .clop-dna-toggle input { margin-right: 4px; }
+            #clop-market-root .clop-filter-toggle { white-space: nowrap; font-weight: normal; cursor: pointer; margin: 12px 0 0 0; }
+            #clop-market-root .clop-filter-toggle input { margin-right: 4px; }
+            #clop-market-root .clop-help { cursor: pointer; margin-top: 12px; }
+            #clop-market-root .clop-friendly-badge { margin-left: 6px; }
+            #clop-market-root .clop-form-row { display: flex; align-items: flex-start; gap: 10px; }
+            #clop-market-root .clop-form-row .clop-place { flex: 1; }
+            #clop-market-root .clop-form-row > button { margin-top: 8px; white-space: nowrap; }
             #clop-market-root.clop-busy .clop-action { pointer-events: none; opacity: .55; }
             #clop-market-root .clop-updated { font-size: 85%; }
         `);
@@ -192,7 +254,7 @@ export const marketplaceModule = {
                 el('button', {
                     class: 'btn btn-default btn-sm clop-action',
                     type: 'button',
-                    onclick: () => { if (state.activeId) load(state.activeId); },
+                    onclick: () => loadAndSweep(state.activeId),
                 }, ['⟳ Refresh']),
             ]));
 
@@ -209,18 +271,47 @@ export const marketplaceModule = {
                 }
             }
 
-            /* resource tabs (DNA hidden unless toggled; the active tab always stays visible) */
+            /* resource tabs — the active tab and favourites (DNA included) are
+             * always visible; the favourites-only / DNA filters only govern
+             * the rest */
             const hasDna = state.resources.some((r) => isDna(r.name));
-            const visible = state.resources.filter((r) => state.showDna || !isDna(r.name) || r.id === state.activeId);
+            const visible = state.resources.filter((r) => r.id === state.activeId
+                || state.favs.has(r.id)
+                || (!state.favsOnly && (state.showDna || !isDna(r.name))));
             const tabs = el('ul', { class: 'nav nav-pills clop-tabs' });
             for (const r of visible) {
                 const label = r.have ? `${r.name} (${core.commas(r.have)})` : r.name;
                 const a = el('a', { onclick: () => load(r.id) }, [label]);
-                tabs.appendChild(el('li', { class: r.id === state.activeId ? 'active clop-action' : 'clop-action' }, [a]));
+                const badge = badgeFor(r.id);
+                if (badge) a.appendChild(badge);
+                tabs.appendChild(el('li', {
+                    class: r.id === state.activeId ? 'active clop-action' : 'clop-action',
+                    'data-rid': r.id,
+                }, [a]));
+            }
+            if (!visible.length) {
+                tabs.appendChild(el('li', { class: 'text-muted' }, [
+                    el('a', {}, ['No favourite markets yet — open one and hit ☆.']),
+                ]));
             }
             const tabsBar = el('div', { class: 'clop-tabsbar' }, [tabs]);
-            if (hasDna) {
-                const cb = el('input', {
+            const favsCb = el('input', {
+                type: 'checkbox',
+                onchange: (ev) => {
+                    state.favsOnly = ev.target.checked;
+                    core.storage.set(FAVS_ONLY_KEY, state.favsOnly ? '1' : '0');
+                    render();
+                },
+            });
+            favsCb.checked = state.favsOnly;
+            tabsBar.appendChild(el('label', { class: 'text-muted clop-filter-toggle' }, [favsCb, ' favourites only']));
+            tabsBar.appendChild(el('a', {
+                class: 'clop-help clop-action',
+                title: 'Favourite markets are re-fetched on refresh to count alliance/friend orders. Click for details.',
+                onclick: () => { state.showHelp = !state.showHelp; render(); },
+            }, ['(?)']));
+            if (!state.favsOnly && hasDna) {
+                const dnaCb = el('input', {
                     type: 'checkbox',
                     onchange: (ev) => {
                         state.showDna = ev.target.checked;
@@ -228,18 +319,75 @@ export const marketplaceModule = {
                         render();
                     },
                 });
-                cb.checked = state.showDna;
-                tabsBar.appendChild(el('label', { class: 'text-muted clop-dna-toggle' }, [cb, ' show DNA']));
+                dnaCb.checked = state.showDna;
+                tabsBar.appendChild(el('label', { class: 'text-muted clop-filter-toggle' }, [dnaCb, ' show DNA']));
             }
             root.appendChild(tabsBar);
+
+            if (state.showHelp) {
+                const help = el('div', { class: 'alert alert-info' });
+                help.appendChild(el('button', {
+                    class: 'close', type: 'button', html: '&times;',
+                    onclick: () => { state.showHelp = false; render(); },
+                }));
+                help.appendChild(el('span', {}, [
+                    'Tab badges count the open orders of your alliance mates and friends (the green/blue names) ' +
+                    'on this side of the market: 68(2) means two of them are trading 68 units in total. ' +
+                    'Only ★ favourite markets and the currently open one are counted. Each favourite costs one ' +
+                    'extra server request on every load and view change, so try not to spam the server.',
+                ]));
+                root.appendChild(help);
+            }
 
             if (!state.activeId) {
                 root.appendChild(el('div', { class: 'alert alert-info' }, ['Pick a resource above to view its market.']));
                 return;
             }
 
-            root.appendChild(renderPlaceForm());
+            root.appendChild(el('div', { class: 'clop-form-row' }, [renderPlaceForm(), favButton()]));
             root.appendChild(renderOrders());
+        }
+
+        // [total(orders)] alliance/friend badge for a tab — favourites and
+        // the open market only.
+        function badgeFor(id) {
+            if (id !== state.activeId && !state.favs.has(id)) return null;
+            const f = state.friendly[state.side][id];
+            if (!f || !f.count) return null;
+            const what = state.side === 'sell' ? 'selling' : 'buying';
+            return el('span', {
+                class: 'badge clop-friendly-badge',
+                title: `${f.count} alliance/friend order${f.count === 1 ? '' : 's'} ${what} ${core.commas(f.amount)} total`,
+            }, [`${core.commas(f.amount)} (${f.count})`]);
+        }
+
+        // Patch badges into the existing tabs without a full render — a
+        // render mid-sweep would wipe whatever the user is typing.
+        function updateBadges() {
+            for (const li of root.querySelectorAll('.clop-tabs li[data-rid]')) {
+                const a = li.querySelector('a');
+                const old = a.querySelector('.clop-friendly-badge');
+                if (old) old.remove();
+                const badge = badgeFor(li.getAttribute('data-rid'));
+                if (badge) a.appendChild(badge);
+            }
+        }
+
+        function favButton() {
+            const fav = state.favs.has(state.activeId);
+            return el('button', {
+                class: `btn btn-sm ${fav ? 'btn-warning' : 'btn-default'} clop-action`,
+                type: 'button',
+                title: fav
+                    ? 'Stop counting alliance/friend orders for this market'
+                    : 'Count alliance/friend orders for this market on every load and refresh',
+                onclick: () => {
+                    if (fav) state.favs.delete(state.activeId);
+                    else state.favs.add(state.activeId);
+                    saveFavs();
+                    render();
+                },
+            }, [fav ? '★ Unfavourite Market' : '☆ Favourite Market']);
         }
 
         /* list / offer form for the active resource */
@@ -406,7 +554,8 @@ export const marketplaceModule = {
         render();
 
         // Orders only come with POST responses, so a remembered resource has
-        // nothing rendered yet — load it dynamically.
-        if (state.activeId && !state.updatedAt) load(state.activeId);
+        // nothing rendered yet — load it dynamically, then sweep favourites.
+        if (state.activeId && !state.updatedAt) loadAndSweep(state.activeId);
+        else sweepFavourites();
     },
 };

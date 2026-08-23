@@ -81,7 +81,9 @@ MarketSnapshot = {
   funds,                       // display string
   mult: {buy, sell} | null,    // your economic-type multipliers
   resources: [{id, name, have, selected}],
-  orders: [{resourceId, counterpartyId, price, amount, own, ownerHtml}],
+  orders: [{resourceId, counterpartyId, price, amount, own, ownerHtml,
+            relation /* 'friend'|'enemy'|'alliance'|null, from the server's
+                        name styling; friend overrides alliance */}],
   messages: {errors: [html], infos: [html]},
 }
 ```
@@ -106,7 +108,30 @@ Features carried over from the single-page version: resource tabs with owned
 counts and a DNA show/hide toggle, Refresh, dynamic buy/sell/place/remove,
 effective-price hints (per-unit, own-order "each / for all", Buy All / Sell
 All totals, live previews on custom amounts), Sell All disabled when you own
-too few, last-viewed resource remembered per mode.
+too few, last-viewed resource remembered per side and mode.
+
+### Alliance/friend badges & favourite markets
+
+Tabs can carry a `[total(orders)]` badge counting the open orders of alliance
+mates and friends on the current side — e.g. `Apples (48) [68(2)]`: you own
+48, and two green/blue-named players are trading 68 in total. "Friendly" means
+the server's own name styling: green (`text-success`) is alliance,
+blue (`text-info`) is friends — and since friend styling *overrides* alliance
+styling server-side, both colors are counted so alliance mates you've
+friended aren't missed. Own orders are excluded.
+
+Counting a market costs one POST, so badges are only maintained for markets
+you mark as **★ favourites** (button next to the place/offer form, stored per
+mode) plus the currently open market (whose counts come free with every
+response). Favourites are re-fetched — one request each, through the same
+serialized queue — on page load, Refresh, and side switches; market tab
+clicks deliberately don't sweep (opening a market refreshes its own badge
+anyway, and an explicit Refresh covers the rest). A newer sweep or side
+switch aborts an older one, and there is deliberately no caching. Favourite tabs (DNA ones included)
+are always visible; the "favourites only" toggle next to the DNA toggle hides
+everything else. The `(?)` link explains the semantics in-page and warns
+against favouriting too many markets (each one is an extra request per
+refresh).
 
 ## Server protocol notes (from the reference PHP source)
 
@@ -179,7 +204,10 @@ Responses are full HTML pages; the adapter extracts:
   economic-type alert has no `div.info` children, which is how it's told apart);
 - order rows: hidden inputs of each row's form (exact `resource_id`,
   counterparty id, raw `price`) + the `viewnation.php` anchor kept as-is so the
-  server's friend/enemy/alliance coloring and region icons carry over;
+  server's friend/enemy/alliance coloring and region icons carry over; the
+  coloring classes inside that anchor also yield each order's `relation`
+  (`text-info` friend / `text-danger` enemy / `text-success` alliance —
+  checked in the server's own precedence order);
 - resource list + "Have" counts: the (hidden) `select[name=resource_id]` options.
 
 A response with no `token_` input means the session died; the adapter surfaces
