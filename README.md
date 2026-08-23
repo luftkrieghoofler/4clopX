@@ -1,57 +1,112 @@
 # CLOP Dynamic UI userscript
 
-A userscript that progressively replaces parts of the CLOP web UI with a dynamic,
-fetch-based client. The server code is not modified; the script talks to the
-existing PHP endpoints and parses their HTML responses, so it works against the
-live instance even where values (prices, resources, multipliers) differ from the
-reference source — everything is read from the pages, nothing is hardcoded.
+A userscript that progressively replaces parts of the CLOP web UI with a
+dynamic, fetch-based client. The server code is not modified; the script talks
+to the existing PHP endpoints and parses their HTML responses, so it works
+against the live instance even where values (prices, resources, multipliers)
+differ from the reference source — everything is read from the pages, nothing
+is hardcoded.
 
-## Install
+## Build & install
 
-Load `clop.user.js` into Violentmonkey / Tampermonkey. It matches
+```sh
+npm install        # once; installs esbuild
+npm run build      # src/ -> dist/clop.user.js
+npm run watch      # rebuild on every source change
+```
+
+Load `dist/clop.user.js` into Violentmonkey / Tampermonkey. It matches
 `https://4clop.org/*`, `https://*.4clop.org/*`, and `http(s)://localhost/*`
-(the docker-compose dev instance). Add an extra `@match` line if your instance
-lives elsewhere.
+(the docker-compose dev instance); add a `@match` line in `src/meta.txt` if
+your instance lives elsewhere.
 
-## Architecture
+Dev loop: run `npm run watch`, and in Violentmonkey install the script from
+`file:///…/dist/clop.user.js` — it offers to track the file, so a page reload
+picks up every rebuild. (Tampermonkey can do the same if you enable "Allow
+access to file URLs" for the extension in the browser.)
 
-One file, two layers:
+## Project layout
 
-- **Core** — a tiny module framework plus shared services:
-  - `Core.register({name, matches(page, location), init(core)})` — modules opt
-    into pages; `Core.boot()` runs the matching ones. Future UI replacements
-    are added as further `Core.register(...)` blocks (or separate files that
-    call `window.CLOPUS.register` before boot on their own pages).
-  - `Core.http.postForm(url, params)` — form-encoded POST returning a parsed
-    `Document`. **Strictly serialized** (promise chain): the game's single-use
-    tokens make concurrent POSTs self-defeating.
-  - `Core.el / addStyle / commas` — DOM helpers.
-- **Module: `marketplace`** — runs on `marketplace.php` and
-  `buyermarketplace.php` in all three modes (resources / `?mode=weapons` /
-  `?mode=armor`, which share the same pages server-side).
+```
+build.mjs                 esbuild bundling: ESM in, one IIFE userscript out
+src/
+  meta.txt                the ==UserScript== header (single source of truth,
+                          prepended verbatim; @version injected into the code)
+  main.js                 entry point: registers modules, boots
+  core.js                 module registry, serialized HTTP queue, DOM/storage
+                          helpers — no page-specific knowledge
+  adapters/
+    market.js             everything that knows the server: token protocol,
+                          POST vocabulary, HTML parsing, stock-page surgery
+  ui/
+    marketplace.js        merged marketplace frontend (pure UI)
+    navbar.js             "Capitalism" menu cleanup (runs on every page)
+dist/
+  clop.user.js            build output — the file you install
+```
 
-## The marketplace module
+Userscript managers can't load ES modules from disk, so multi-file userscripts
+are bundled; esbuild is the light way to do it (the heavier ecosystem options
+are `vite-plugin-monkey` / `webpack-userscript`, which add dev-server
+hot-reload and header management — worth it if this grows a lot).
 
-Replaces the resource `<select>` + full-page-reload flow with:
+## Architecture: adapter vs frontend
 
-- resource **tabs** ("Name (owned)" labels parsed from the server's option
-  list) — switching tabs fetches that market dynamically; DNA resources are
-  hidden behind a "show DNA" toggle (persisted in `localStorage`);
-- a **Refresh** button (impossible in the old UI — see token notes below);
-- dynamic **buy / sell / list / remove** actions that re-render funds, owned
-  counts, and the order list from the server's response;
-- effective-price hints per row (what *you* pay/get after your economic-type
-  multipliers, parsed off the page): per-unit on others' rows, "each / for
-  all" on your own listings and offers; totals on the Buy All / Sell All
-  buttons; live bit previews next to the custom-amount inputs and on the
-  place/offer form; Sell All is disabled when you don't own enough;
-- last-viewed resource remembered per market/mode in `localStorage` and
-  auto-loaded on next visit.
+The code is split so that the two likely kinds of change stay isolated:
 
-Everything is re-parsed from each POST response (token, funds, alerts,
-"(Have N)" counts, deal rows), so the UI always reflects the server's state
-after an action, including error messages like "Somepony else bought the last
-one!".
+- **`src/adapters/market.js`** is the only file that knows the site. It owns
+  the token bookkeeping, the form-field vocabulary of both marketplace
+  endpoints, all HTML parsing, and the "hide the stock widgets" surgery. If
+  the site's markup drifts, the `parse*` functions here are the only thing to
+  fix. If the dev ever ships a real API, a second adapter implementing the
+  same interface replaces this one and the UI is untouched.
+- **`src/ui/*.js`** never touches server HTML. The marketplace frontend calls
+  the adapter interface and renders `MarketSnapshot` objects.
+
+The adapter interface (one adapter instance per market side × mode):
+
+```js
+adapter = createMarketAdapter(core, kind /* 'sell'|'buyer' */, mode, seedDoc?)
+adapter.ready()                              // ensure a token is held (GET-seeds if needed)
+adapter.snapshotFromDocument(doc)            // boot state from the hosting page, no network
+adapter.load(resourceId)                     // -> MarketSnapshot
+adapter.createOrder(resourceId, amount, price)
+adapter.takeOrder(order, 'one'|'all'|'<n>')  // buy from a listing / sell to an offer
+adapter.cancelOrder(order)
+```
+
+```js
+MarketSnapshot = {
+  kind: 'sell'|'buyer',
+  resourceId,                  // which resource `orders` belongs to
+  funds,                       // display string
+  mult: {buy, sell} | null,    // your economic-type multipliers
+  resources: [{id, name, have, selected}],
+  orders: [{resourceId, counterpartyId, price, amount, own, ownerHtml}],
+  messages: {errors: [html], infos: [html]},
+}
+```
+
+## The merged marketplace
+
+`marketplace.php` and `buyermarketplace.php` (plus their weapons/armor modes)
+are now one UI with two top-level tabs, **Sell Orders** (listings you can buy
+from) and **Buy Orders** (offers you can sell to). The navbar module collapses
+each Capitalism menu pair into a single entry ("Marketplace",
+"Weapons Marketplace", "Armor Marketplace").
+
+Both stock pages host the same UI — there is no custom "root page", because
+the script still needs a server-rendered shell (session, header, nav) to live
+in. Switching sides never navigates: the other endpoint is driven by its own
+adapter, and `history.replaceState` swaps the URL between the two stock paths
+so refresh and bookmarks land on the view you were on. The non-host side's
+token is seeded lazily with one GET the first time you switch to it.
+
+Features carried over from the single-page version: resource tabs with owned
+counts and a DNA show/hide toggle, Refresh, dynamic buy/sell/place/remove,
+effective-price hints (per-unit, own-order "each / for all", Buy All / Sell
+All totals, live previews on custom amounts), Sell All disabled when you own
+too few, last-viewed resource remembered per mode.
 
 ## Server protocol notes (from the reference PHP source)
 
@@ -61,7 +116,7 @@ Relevant files: `backend/backend_marketplace.php`, `backend/backend_buyermarketp
 
 `$_SESSION["token_<market>"]` is a single-use anti-double-submit token, one per
 market table (`marketplace`, `weaponsmarketplace`, `armormarketplace`, and the
-three `*buyermarketplace` variants — so the two pages/three modes never clash
+three `*buyermarketplace` variants — so the two sides/three modes never clash
 with each other):
 
 - every POST must send it as `token_<market>`;
@@ -75,15 +130,17 @@ This explains the old UI's quirks:
 - a plain GET shows no orders at all, because the deals query runs only
   `if ($_POST)`.
 
-Consequences the script exploits:
+Consequences the adapter exploits:
 
 - "loading" a market = POST `{token, mode, resource_id}` with no action verb;
-- after any POST we harvest the fresh token from the response, enabling
+- after any POST it harvests the fresh token from the response, enabling
   unlimited chained requests and a real Refresh button;
+- a GET seeds the token for a market the user hasn't visited this session
+  (used for the non-host side of the merged UI);
 - on "Try again." (e.g. a second browser tab consumed the token) nothing was
   executed server-side (all mutations sit inside `if (!$errors)`), and the
-  error response already carries the *new* token — so the script transparently
-  retries once.
+  error response already carries the *new* token — so the adapter
+  transparently retries once.
 
 ### Request vocabulary
 
@@ -109,35 +166,27 @@ Common fields: `token_<market>`, `mode` (`""` | `weapons` | `armor`), `resource_
 | `sellamount=Sell:`               | `sellingto_id`, `price`, `sellingamount` |
 | `remove=Remove from Marketplace` | `sellingto_id`, `price` (escrow refunded) |
 
-Deals are keyed server-side by `(nation_id, resource_id, price)` — that's why
+Orders are keyed server-side by `(nation_id, resource_id, price)` — that's why
 rows carry the counterparty nation id and unit price rather than an order id.
 
 ### Response parsing
 
-Responses are full HTML pages; the script extracts:
+Responses are full HTML pages; the adapter extracts:
 
 - fresh token: `input[name^="token_"]`;
 - funds: the `.well` containing "Funds:";
 - alerts: `.alert-danger div.error` / `.alert-info div.info` (the static
   economic-type alert has no `div.info` children, which is how it's told apart);
-- deal rows: hidden inputs of each row's form (exact `resource_id`,
+- order rows: hidden inputs of each row's form (exact `resource_id`,
   counterparty id, raw `price`) + the `viewnation.php` anchor kept as-is so the
   server's friend/enemy/alliance coloring and region icons carry over;
 - resource list + "Have" counts: the (hidden) `select[name=resource_id]` options.
 
-A response with no `token_` input means the session died; the script surfaces
+A response with no `token_` input means the session died; the adapter surfaces
 "reload and log in" instead of retrying.
 
 ## Adding a module
 
-```js
-window.CLOPUS.register({
-    name: 'my-module',
-    matches: (page) => page === 'somepage.php',
-    init(core) { /* hide old widgets, render, use core.http.postForm(...) */ },
-});
-```
-
-Register before `Core.boot()` runs (i.e. inside this file above the boot call,
-or convert to `@require` parts later). Keep to the same pattern: parse state
-from the live document, POST via the serialized queue, re-parse each response.
+Create `src/ui/<name>.js` exporting `{name, matches(page, location), init(core)}`,
+register it in `src/main.js`, rebuild. If it needs new server interactions,
+give it an adapter in `src/adapters/` and keep the parsing there.
