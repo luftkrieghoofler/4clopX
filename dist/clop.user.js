@@ -5,12 +5,12 @@
 // @description  Modular client-side UI replacement for CLOP. Merged dynamic marketplace (sell/buy orders in one page).
 // @match        https://4clop.org/*
 // @match        https://*.4clop.org/*
-// @match        http://localhost/*
-// @match        https://localhost/*
 // @updateURL    https://github.com/luftkrieghoofler/4clopX/releases/latest/download/clop.user.js
 // @downloadURL  https://github.com/luftkrieghoofler/4clopX/releases/latest/download/clop.user.js
 // @run-at       document-end
-// @grant        none
+// @grant        GM_getValue
+// @grant        GM_setValue
+// @grant        GM_deleteValue
 // ==/UserScript==
 
 (() => {
@@ -119,6 +119,44 @@
         core.storage.set(`clopus.setting.${key}`, raw);
       }
     },
+    /* ---------------- secret storage ----------------
+     * For credentials and similar.  Exclusively the userscript manager's
+     * script-private storage (GM_setValue) — page scripts, site XSS, and
+     * other userscripts cannot read it.  There is deliberately NO fallback
+     * to page localStorage: features needing secrets must check available()
+     * and degrade to "feature off" instead of degrading the storage.  Async
+     * API so the Greasemonkey 4 promise flavor also works. */
+    secrets: {
+      available() {
+        return typeof GM_getValue === "function" || typeof GM !== "undefined" && GM && typeof GM.getValue === "function";
+      },
+      _require() {
+        if (!this.available()) {
+          throw new Error("Secret storage unavailable: the userscript needs the GM_getValue/GM_setValue/GM_deleteValue grants.");
+        }
+      },
+      async get(key) {
+        this._require();
+        const raw = typeof GM_getValue === "function" ? GM_getValue(key) : await GM.getValue(key);
+        if (raw === null || raw === void 0) return null;
+        try {
+          return JSON.parse(raw);
+        } catch (e) {
+          return null;
+        }
+      },
+      async set(key, value) {
+        this._require();
+        const raw = JSON.stringify(value);
+        if (typeof GM_setValue === "function") GM_setValue(key, raw);
+        else await GM.setValue(key, raw);
+      },
+      async remove(key) {
+        this._require();
+        if (typeof GM_deleteValue === "function") GM_deleteValue(key);
+        else await GM.deleteValue(key);
+      }
+    },
     /* ---------------- storage ---------------- */
     storage: {
       get(key, fallback = null) {
@@ -137,6 +175,152 @@
       }
     }
   };
+
+  // src/adapters/session.js
+  function isLoggedInDoc(doc) {
+    return !!doc.querySelector('a[href="logout.php"]');
+  }
+  function findLoginForm(doc) {
+    return doc.querySelector('form[name="login_top"]') || [...doc.querySelectorAll("form")].find((f) => (f.getAttribute("action") || "").includes("login.php"));
+  }
+  async function login(core2, username, password) {
+    try {
+      const doc = await core2.http.postForm("login.php", { username, password });
+      if (isLoggedInDoc(doc)) return { ok: true };
+      const errors = [...doc.querySelectorAll(".alert-danger .error")].map((d) => d.textContent.trim());
+      return { ok: false, errors: errors.length ? errors : ["unexpected response — no error shown"] };
+    } catch (e) {
+      return { ok: false, errors: [String(e.message || e)] };
+    }
+  }
+
+  // src/ui/autologin.js
+  var CRED_KEY = "credentials";
+  var LAST_GOOD = "clopus.nav.lastGood";
+  var LAST_CLICK = "clopus.nav.lastClick";
+  var ATTEMPT_AT = "clopus.autologin.attemptAt";
+  var RETURN_BLACKLIST = /* @__PURE__ */ new Set(["", "index.php", "login.php", "logout.php", "nonation.php", "newuser.php"]);
+  function pageOf(url) {
+    try {
+      return new URL(url, location.href).pathname.replace(/^.*\//, "");
+    } catch (e) {
+      return null;
+    }
+  }
+  function sget(key) {
+    try {
+      const v = sessionStorage.getItem(key);
+      return v ? JSON.parse(v) : null;
+    } catch (e) {
+      return null;
+    }
+  }
+  function sset(key, value) {
+    try {
+      sessionStorage.setItem(key, JSON.stringify(value));
+    } catch (e) {
+    }
+  }
+  var autologinModule = {
+    name: "autologin",
+    matches: () => true,
+    init(core2) {
+      core2.settings.define({
+        key: "autologin.enabled",
+        label: "Automatically log back in when the session expires",
+        description: "Uses the credentials remembered via the login form checkbox (stored in the userscript manager, unreadable to page scripts).",
+        type: "bool",
+        default: true
+      });
+      core2.autologin = {
+        forget: () => core2.secrets.remove(CRED_KEY).then(() => console.info("[CLOP-US] stored credentials removed"))
+      };
+      document.addEventListener("click", (ev) => {
+        const a = ev.target && ev.target.closest ? ev.target.closest("a[href]") : null;
+        if (!a) return;
+        try {
+          const url = new URL(a.getAttribute("href"), location.href);
+          if (url.origin !== location.origin) return;
+          sset(LAST_CLICK, { href: url.href, at: Date.now() });
+        } catch (e) {
+        }
+      }, true);
+      if (isLoggedInDoc(document)) {
+        if (!RETURN_BLACKLIST.has(pageOf(location.href))) {
+          sset(LAST_GOOD, { href: location.href, at: Date.now() });
+        }
+        return;
+      }
+      const form = findLoginForm(document);
+      if (!form) return;
+      if (!core2.secrets.available()) {
+        form.appendChild(core2.el("div", { class: "text-muted" }, [
+          "CLOP userscript: auto-login unavailable — the script is running without its GM_getValue/GM_setValue grants."
+        ]));
+        return;
+      }
+      enhanceLoginForm(core2, form);
+      maybeAutoLogin(core2, form);
+    }
+  };
+  async function enhanceLoginForm(core2, form) {
+    const el = core2.el.bind(core2);
+    const stored = await core2.secrets.get(CRED_KEY);
+    const cb = el("input", { type: "checkbox" });
+    cb.checked = !!stored;
+    form.appendChild(el("div", { class: "checkbox" }, [
+      el("label", {
+        title: "Log back in automatically whenever the session expires. Credentials are stored in your userscript manager, out of reach of page scripts."
+      }, [cb, " Auto-login (remember credentials)"])
+    ]));
+    form.addEventListener("submit", () => {
+      const username = (form.querySelector('input[name="username"]') || {}).value;
+      const password = (form.querySelector('input[name="password"]') || {}).value;
+      if (cb.checked && username && password) {
+        core2.secrets.set(CRED_KEY, { username: username.trim(), password });
+      } else if (!cb.checked) {
+        core2.secrets.remove(CRED_KEY);
+      }
+    }, true);
+  }
+  async function maybeAutoLogin(core2, form) {
+    if (!core2.settings.get("autologin.enabled")) return;
+    const creds = await core2.secrets.get(CRED_KEY);
+    if (!creds || !creds.username || creds.disabled) return;
+    const lastClick = sget(LAST_CLICK);
+    if (lastClick && pageOf(lastClick.href) === "logout.php" && Date.now() - lastClick.at < 6e4) {
+      console.info("[CLOP-US] auto-login skipped: you just logged out");
+      return;
+    }
+    const lastAttempt = sget(ATTEMPT_AT) || 0;
+    if (Date.now() - lastAttempt < 3e4) return;
+    sset(ATTEMPT_AT, Date.now());
+    const el = core2.el.bind(core2);
+    const banner = el("div", { class: "alert alert-info" }, [`Auto-login: logging back in as ${creds.username}…`]);
+    form.parentNode.insertBefore(banner, form);
+    const result = await login(core2, creds.username, creds.password);
+    if (result.ok) {
+      banner.textContent = "Auto-login: success, returning…";
+      let target = "overview.php";
+      const good = sget(LAST_GOOD);
+      if (lastClick && Date.now() - lastClick.at < 6e4 && !RETURN_BLACKLIST.has(pageOf(lastClick.href))) {
+        target = lastClick.href;
+      } else if (good && !RETURN_BLACKLIST.has(pageOf(good.href))) {
+        target = good.href;
+      }
+      location.replace(target);
+      return;
+    }
+    const msg = result.errors[0] || "unknown error";
+    if (/login incorrect/i.test(msg)) {
+      await core2.secrets.set(CRED_KEY, { ...creds, disabled: true });
+      banner.className = "alert alert-danger";
+      banner.textContent = `Auto-login failed: ${msg} Auto-login is now disabled — log in manually with the checkbox ticked to update the stored credentials.`;
+    } else {
+      banner.className = "alert alert-warning";
+      banner.textContent = `Auto-login failed: ${msg} — not retrying automatically.`;
+    }
+  }
 
   // src/adapters/market.js
   var PAGES = { sell: "marketplace.php", buyer: "buyermarketplace.php" };
@@ -958,7 +1142,12 @@ Sell ${core2.commas(expected.n)} anyway?`
   };
 
   // src/main.js
+  core.register(autologinModule);
   core.register(marketplaceModule);
   core.boot();
-  window.CLOPUS = core;
+  try {
+    (typeof unsafeWindow !== "undefined" ? unsafeWindow : window).CLOPUS = core;
+  } catch (e) {
+    window.CLOPUS = core;
+  }
 })();

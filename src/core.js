@@ -121,6 +121,43 @@ export const core = {
         },
     },
 
+    /* ---------------- secret storage ----------------
+     * For credentials and similar.  Exclusively the userscript manager's
+     * script-private storage (GM_setValue) — page scripts, site XSS, and
+     * other userscripts cannot read it.  There is deliberately NO fallback
+     * to page localStorage: features needing secrets must check available()
+     * and degrade to "feature off" instead of degrading the storage.  Async
+     * API so the Greasemonkey 4 promise flavor also works. */
+
+    secrets: {
+        available() {
+            return typeof GM_getValue === 'function'
+                || (typeof GM !== 'undefined' && GM && typeof GM.getValue === 'function');
+        },
+        _require() {
+            if (!this.available()) {
+                throw new Error('Secret storage unavailable: the userscript needs the GM_getValue/GM_setValue/GM_deleteValue grants.');
+            }
+        },
+        async get(key) {
+            this._require();
+            const raw = typeof GM_getValue === 'function' ? GM_getValue(key) : await GM.getValue(key);
+            if (raw === null || raw === undefined) return null;
+            try { return JSON.parse(raw); } catch (e) { return null; }
+        },
+        async set(key, value) {
+            this._require();
+            const raw = JSON.stringify(value);
+            if (typeof GM_setValue === 'function') GM_setValue(key, raw);
+            else await GM.setValue(key, raw);
+        },
+        async remove(key) {
+            this._require();
+            if (typeof GM_deleteValue === 'function') GM_deleteValue(key);
+            else await GM.deleteValue(key);
+        },
+    },
+
     /* ---------------- storage ---------------- */
 
     storage: {

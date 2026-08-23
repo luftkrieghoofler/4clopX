@@ -16,9 +16,12 @@ npm run watch      # rebuild on every source change
 ```
 
 Load `dist/clop.user.js` into Violentmonkey / Tampermonkey. It matches
-`https://4clop.org/*`, `https://*.4clop.org/*`, and `http(s)://localhost/*`
-(the docker-compose dev instance); add a `@match` line in `src/meta.txt` if
-your instance lives elsewhere.
+`https://4clop.org/*` and `https://*.4clop.org/*`; add a `@match` line in
+`src/meta.txt` for the docker-compose dev instance or any other host. The
+script requires the `GM_getValue`/`GM_setValue`/`GM_deleteValue` grants (for
+credential storage), which means it runs in the manager's sandbox; the
+`CLOPUS` debug handle is still exported to the page window via
+`unsafeWindow`.
 
 Dev loop: run `npm run watch`, and in Violentmonkey install the script from
 `file:///…/dist/clop.user.js` — it offers to track the file, so a page reload
@@ -40,8 +43,10 @@ src/
                           POST vocabulary, HTML parsing, stock-page surgery
     overview.js           overview.php scraping: per-resource stock / upkeep
                           ("Used"/tick) / net production
+    session.js            login.php protocol + logged-in/login-form detection
   ui/
     marketplace.js        merged marketplace frontend (pure UI)
+    autologin.js          auto re-login on session expiry, return-to-page
 dist/
   clop.user.js            build output — the file you install
 ```
@@ -171,6 +176,35 @@ enumerable (`core.settings.all()`, also reachable from the console via
 | key                                | type | default | meaning |
 |------------------------------------|------|---------|---------|
 | `market.sellMaxNegativeNetConfirm` | bool | true    | confirm Sell Max when net production is negative |
+| `autologin.enabled`                | bool | true    | log back in automatically when the session expires |
+
+## Auto-login
+
+The game expires sessions frequently, bouncing you to the login screen with
+a plain `Location: index.php` redirect (the URL you wanted is lost
+server-side). The autologin module fixes both halves:
+
+- **Opt-in**: a "Auto-login (remember credentials)" checkbox is added to the
+  stock login form. Ticked, a manual login stores the credentials;
+  unticked, it erases them. `CLOPUS.autologin.forget()` also erases them.
+- **Storage**: credentials live *only* in the userscript manager's
+  script-private storage (`core.secrets`, backed by `GM_setValue`). Page
+  scripts — including any XSS on the site — and other userscripts cannot
+  read it. There is deliberately no fallback to `localStorage`: without the
+  GM grants the feature turns itself off and says so on the login form.
+  (Disk-level exposure is the same as any browser storage; the manager
+  storage specifically removes the same-origin/XSS attack surface.)
+- **Return-to-page**: on every logged-in page the module records the page
+  URL, and a capture-phase listener records each same-origin link click
+  *before* navigation. After a successful re-login it `location.replace`s
+  to the recently-clicked link (if <60s old), else the last logged-in page,
+  else overview.php — so the login page never enters history.
+- **Lockout safety**: the server rate-limits *failed* logins (>20/IP/2h),
+  so a "Login incorrect." response permanently disables auto-login (flag on
+  the stored credentials) until a manual login with the checkbox re-saves
+  them; other failures don't retry; attempts are throttled to one per 30s
+  per tab; and a fresh logout click suppresses auto-login entirely so
+  logging out stays possible.
 
 ## Server protocol notes (from the reference PHP source)
 

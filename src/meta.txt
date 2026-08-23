@@ -8,5 +8,7 @@
 // @updateURL    https://github.com/luftkrieghoofler/4clopX/releases/latest/download/clop.user.js
 // @downloadURL  https://github.com/luftkrieghoofler/4clopX/releases/latest/download/clop.user.js
 // @run-at       document-end
-// @grant        none
+// @grant        GM_getValue
+// @grant        GM_setValue
+// @grant        GM_deleteValue
 // ==/UserScript==
