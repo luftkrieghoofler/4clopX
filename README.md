@@ -38,14 +38,16 @@ login screen.
 
 ## Notes
 
-**Favourite markets.** A badge like `[68(2)]` on a resource tab means
+**Favourite markets.** A badge like `[2(68)]` on a resource tab means
 alliance mates (green names) and friends (blue names) have 2 open orders
 totalling 68 units in that market, on the current side. Keeping a badge up
 to date costs one extra request per refresh, so badges are only maintained
 for the market you have open plus the ones you star as favourites — star the
-few you actually watch. Favourite tabs also stay visible when the
-DNA-hiding or favourites-only filters are on. The `(?)` link next to the
-star explains the details in-page.
+few you actually watch. Favourite tabs and the currently open market always
+stay visible — favouriting a DNA market is also how you keep it around while
+"show DNA" is off; in favourites-only mode the DNA toggle is disabled since
+favourites are always shown. The `(?)` link next to the star explains the
+details in-page.
 
 **Sell All / Sell Max.** The script reserves your upkeep — the per-tick
 "Used" amounts from the Overview plus the military's 12-hour resource

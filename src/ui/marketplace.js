@@ -105,6 +105,10 @@ export const marketplaceModule = {
 
         const isDna = (name) => /^DNA/i.test(name);
 
+        // Visual clarity: button verbs and list prices are bold so they
+        // stand out against the auxiliary price info around them.
+        const bold = (text) => el('strong', {}, [text]);
+
         // Orders from alliance mates (green) or friends (blue), per the
         // server's own styling; own orders excluded.  (Friend styling
         // overrides alliance styling server-side, which is why both count.)
@@ -365,7 +369,8 @@ export const marketplaceModule = {
 
             /* resource tabs — the active tab and favourites (DNA included) are
              * always visible; the favourites-only / DNA filters only govern
-             * the rest */
+             * the rest.  Favouriting a DNA market is thus also the way to
+             * keep it visible while "show DNA" is off. */
             const hasDna = state.resources.some((r) => isDna(r.name));
             const visible = state.resources.filter((r) => r.id === state.activeId
                 || state.favs.has(r.id)
@@ -402,7 +407,7 @@ export const marketplaceModule = {
                 title: 'Favourite markets are re-fetched on refresh to count alliance/friend orders. Click for details.',
                 onclick: () => { state.showHelp = !state.showHelp; render(); },
             }, ['(?)']));
-            if (!state.favsOnly && hasDna) {
+            if (hasDna) {
                 const dnaCb = el('input', {
                     type: 'checkbox',
                     onchange: (ev) => {
@@ -412,7 +417,15 @@ export const marketplaceModule = {
                     },
                 });
                 dnaCb.checked = state.showDna;
-                tabsBar.appendChild(el('label', { class: 'text-muted clop-filter-toggle' }, [dnaCb, ' show DNA']));
+                // Kept visible (hiding it would shift the controls around)
+                // but inert in favourites-only mode, where favourites are
+                // always shown anyway.
+                const dnaLabel = el('label', { class: 'text-muted clop-filter-toggle' }, [dnaCb, ' show DNA']);
+                if (state.favsOnly) {
+                    dnaCb.disabled = true;
+                    dnaLabel.title = 'No effect while "favourites only" is on — favourite markets are always shown';
+                }
+                tabsBar.appendChild(dnaLabel);
             }
             root.appendChild(tabsBar);
 
@@ -424,7 +437,7 @@ export const marketplaceModule = {
                 }));
                 help.appendChild(el('span', {}, [
                     'Tab badges count the open orders of your alliance mates and friends (the green/blue names) ' +
-                    'on this side of the market: 68(2) means two of them are trading 68 units in total. ' +
+                    'on this side of the market: 2(68) means two of them are trading 68 units in total. ' +
                     'Only ★ favourite markets and the currently open one are counted. Each favourite costs one ' +
                     'extra server request on every load and view change, so try not to spam the server.',
                 ]));
@@ -440,7 +453,7 @@ export const marketplaceModule = {
             root.appendChild(renderOrders());
         }
 
-        // [total(orders)] alliance/friend badge for a tab — favourites and
+        // [orders(total)] alliance/friend badge for a tab — favourites and
         // the open market only.
         function badgeFor(id) {
             if (id !== state.activeId && !state.favs.has(id)) return null;
@@ -450,7 +463,7 @@ export const marketplaceModule = {
             return el('span', {
                 class: 'badge clop-friendly-badge',
                 title: `${f.count} alliance/friend order${f.count === 1 ? '' : 's'} ${what} ${core.commas(f.amount)} total`,
-            }, [`${core.commas(f.amount)} (${f.count})`]);
+            }, [`${f.count} (${core.commas(f.amount)})`]);
         }
 
         // Patch badges into the existing tabs without a full render — a
@@ -545,7 +558,7 @@ export const marketplaceModule = {
 
         function renderOrderRow(order, idx) {
             const sell = state.side === 'sell';
-            const priceCell = el('td', {}, [el('span', { class: 'text-danger' }, [core.commas(order.price)])]);
+            const priceCell = el('td', {}, [el('span', { class: 'text-danger' }, [bold(core.commas(order.price))])]);
             const unit = (mult) => core.commas(Math.floor(order.price * mult));
             const total = (mult) => core.commas(Math.floor(order.price * order.amount * mult));
             let hint;
@@ -572,11 +585,11 @@ export const marketplaceModule = {
                 actions.appendChild(el('button', {
                     class: 'btn btn-primary btn-sm', type: 'button',
                     onclick: () => run(() => adapter().takeOrder(order, 'one')),
-                }, ['Buy One']));
+                }, [bold('Buy One')]));
                 actions.appendChild(el('button', {
                     class: 'btn btn-warning btn-sm', type: 'button',
                     onclick: () => run(() => adapter().takeOrder(order, 'all')),
-                }, [`Buy All (${total(state.mult.buy)} bits)`]));
+                }, [bold('Buy All'), ` (${total(state.mult.buy)} bits)`]));
                 actions.appendChild(amountForm('Buy:', 'btn-success',
                     (n) => run(() => adapter().takeOrder(order, n)),
                     (n) => `pay ${core.commas(Math.floor(order.price * n * state.mult.buy))} bits`));
@@ -584,7 +597,7 @@ export const marketplaceModule = {
                 actions.appendChild(el('button', {
                     class: 'btn btn-primary btn-sm', type: 'button',
                     onclick: () => run(() => adapter().takeOrder(order, 'one')),
-                }, ['Sell One']));
+                }, [bold('Sell One')]));
                 actions.appendChild(sellAllButton(order));
                 if (!mode) actions.appendChild(sellMaxButton(order));
                 actions.appendChild(amountForm('Sell:', 'btn-success',
@@ -612,7 +625,7 @@ export const marketplaceModule = {
             const btn = el('button', {
                 class: 'btn btn-warning btn-sm clop-sellall', type: 'button',
                 onclick: () => run(() => adapter().takeOrder(order, 'all')),
-            }, [`Sell All (${core.commas(bits)} bits)`]);
+            }, [bold('Sell All'), ` (${core.commas(bits)} bits)`]);
             if (have < order.amount) {
                 btn.disabled = true;
                 btn.title = `You only have ${core.commas(have)}`;
@@ -627,9 +640,9 @@ export const marketplaceModule = {
         function sellMaxButton(order) {
             const have = ownedAmount(order.resourceId);
             const up = upkeepFor(order.resourceId);
-            const btn = el('button', { class: 'btn btn-info btn-sm clop-sellmax', type: 'button' }, []);
+            const btn = el('button', { class: 'btn btn-info btn-sm clop-sellmax', type: 'button' }, [bold('Sell Max')]);
             if (!up) {
-                btn.textContent = 'Sell Max (…)';
+                btn.append(' (…)');
                 btn.disabled = true;
                 btn.title = state.upkeep
                     ? 'No upkeep data for this resource on the Overview page'
@@ -639,18 +652,17 @@ export const marketplaceModule = {
             const reserve = reserveOf(up);
             const max = Math.min(have - reserve, order.amount);
             if (max < 1) {
-                btn.textContent = 'Sell Max';
                 btn.disabled = true;
                 btn.title = `Nothing to spare: you have ${core.commas(have)} and keep ` +
                     `${core.commas(reserve)} back (${reserveText(up)})`;
             } else if (have - reserve > order.amount) {
-                btn.textContent = `Sell Max (${core.commas(max)}: ` +
-                    `${core.commas(Math.floor(order.price * max * state.mult.sell))} bits)`;
+                btn.append(` (${core.commas(max)}: ` +
+                    `${core.commas(Math.floor(order.price * max * state.mult.sell))} bits)`);
                 btn.disabled = true;
                 btn.title = `You can spare ${core.commas(have - reserve)} — more than this whole order; use Sell All`;
             } else {
-                btn.textContent = `Sell Max (${core.commas(max)}: ` +
-                    `${core.commas(Math.floor(order.price * max * state.mult.sell))} bits)`;
+                btn.append(` (${core.commas(max)}: ` +
+                    `${core.commas(Math.floor(order.price * max * state.mult.sell))} bits)`);
                 btn.title = `Sell everything above your reserve of ${core.commas(reserve)} ` +
                     `(${reserveText(up)}); re-verified before selling`;
                 btn.addEventListener('click', () => sellMax(order, { reserve, n: max }, btn));
@@ -690,7 +702,7 @@ export const marketplaceModule = {
             }, [
                 el('div', { class: 'input-group input-group-sm clop-buyn' }, [
                     el('span', { class: 'input-group-btn' }, [
-                        el('button', { class: `btn btn-sm ${btnClass}`, type: 'submit' }, [label]),
+                        el('button', { class: `btn btn-sm ${btnClass}`, type: 'submit' }, [bold(label)]),
                     ]),
                     input,
                 ]),
