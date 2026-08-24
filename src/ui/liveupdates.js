@@ -79,6 +79,25 @@ export function friendlyTotals(mode, side) {
     return { orders, amount };
 }
 
+// Per-favourite-market watch flags: a watched market is swept on every poll
+// and may raise desktop notifications.  Only explicit overrides are stored
+// (keyed like the friendly cache); the default is ON for buy orders (offers
+// you can sell into — the actionable side) and OFF for sell orders.  A
+// future settings UI edits these through core.marketNotify.
+const NOTIFY_KEY = 'clopus.market.notify';
+
+export function marketNotifyEnabled(mode, side, resourceId) {
+    const overrides = jget(NOTIFY_KEY, {}) || {};
+    const v = overrides[`${mode || 'resources'}|${side}|${resourceId}`];
+    return typeof v === 'boolean' ? v : side === 'buyer';
+}
+
+export function setMarketNotify(mode, side, resourceId, on) {
+    const overrides = jget(NOTIFY_KEY, {}) || {};
+    overrides[`${mode || 'resources'}|${side}|${resourceId}`] = !!on;
+    jset(NOTIFY_KEY, overrides);
+}
+
 export const liveUpdatesModule = {
     name: 'liveupdates',
 
@@ -125,7 +144,7 @@ export const liveUpdatesModule = {
         let leading = false;
         let polling = false;
         let stopped = false;
-        let pendingPoll = false;
+        let pendingPoll = null;      // opts for a poll requested before leading
         let pollTimer = null;
 
         core.addStyle(`
@@ -150,19 +169,20 @@ export const liveUpdatesModule = {
             b.textContent = String(count);
         }
 
+        // Only buy orders (offers you can sell into) get counted in the blue
+        // badges — sell listings are informational, not actionable.
         function updateMenuBadges() {
-            let grandTotal = 0;
-            for (const v of Object.values(readFriendlyCache())) grandTotal += v.count;
-            for (const a of document.querySelectorAll(
-                'nav.navbar a[href^="marketplace.php"], nav.navbar a[href^="buyermarketplace.php"]')) {
+            let buyTotal = 0;
+            for (const [key, v] of Object.entries(readFriendlyCache())) {
+                if (key.includes('|buyer|')) buyTotal += v.count;
+            }
+            for (const a of document.querySelectorAll('nav.navbar a[href^="buyermarketplace.php"]')) {
                 const url = new URL(a.getAttribute('href'), location.href);
-                const mode = url.searchParams.get('mode') || '';
-                const side = url.pathname.includes('buyermarketplace') ? 'buyer' : 'sell';
-                setMenuBadge(a, friendlyTotals(mode, side).orders);
+                setMenuBadge(a, friendlyTotals(url.searchParams.get('mode') || '', 'buyer').orders);
             }
             const cap = [...document.querySelectorAll('nav.navbar a.dropdown-toggle')]
                 .find((a) => (a.textContent || '').trim().startsWith('Capitalism'));
-            if (cap) setMenuBadge(cap, grandTotal);
+            if (cap) setMenuBadge(cap, buyTotal);
         }
 
         /* ---------------- notifications ---------------- */
@@ -206,7 +226,8 @@ export const liveUpdatesModule = {
 
         /* ---------------- the poll ---------------- */
 
-        async function poll() {
+        async function poll(opts) {
+            const visit = (opts && opts.visit) || null;
             if (polling || stopped) return;
             polling = true;
             try {
@@ -224,7 +245,7 @@ export const liveUpdatesModule = {
                     if (what && c.to > c.from) notify(`${c.to} ${what}`, c.key, c.key);
                 }
                 jset(K.badges, { at: Date.now(), values });
-                await sweepFavourites();
+                await sweepFavourites(visit);
             } catch (e) {
                 console.warn('[CLOP-US] live update failed:', e);
             } finally {
@@ -233,26 +254,36 @@ export const liveUpdatesModule = {
             }
         }
 
-        // One request per favourite market per side; the previous cache is
-        // the notification baseline (first-ever sweep of a market is
-        // silent).  The cache is rebuilt wholesale so unfavourited markets
-        // drop out, and written only after a fully successful sweep.
-        async function sweepFavourites() {
+        // One request per WATCHED favourite market (see marketNotifyEnabled:
+        // buy orders by default, sell orders only when opted in), plus the
+        // mode+side the user is actively visiting (`visit`), which is swept
+        // even when unwatched — silently.  Unswept favourites carry their
+        // cached counts over; the previous cache is the notification
+        // baseline (first-ever sweep of a market is silent).  The cache is
+        // rebuilt wholesale so unfavourited markets drop out, and written
+        // only after a fully successful sweep.
+        async function sweepFavourites(visit) {
             const prev = readFriendlyCache();
             const next = {};
             for (const mode of MODES) {
                 let favs = [];
                 try { favs = JSON.parse(core.storage.get(`clopus.market.favs.${mode || 'resources'}`, '[]')); } catch (e) { /* ignore */ }
                 for (const side of ['sell', 'buyer']) {
+                    const visiting = !!visit && visit.side === side && (visit.mode || '') === mode;
                     for (const id of favs) {
+                        const key = `${mode || 'resources'}|${side}|${id}`;
+                        const watched = marketNotifyEnabled(mode, side, id);
+                        if (!watched && !visiting) {
+                            if (prev[key]) next[key] = prev[key];
+                            continue;
+                        }
                         const snap = await marketAdapter(core, side, mode).load(id);
                         const summary = summarizeFriendly(snap.orders);
                         const res = snap.resources.find((r) => r.id === id);
-                        const key = `${mode || 'resources'}|${side}|${id}`;
                         next[key] = { ...summary, name: res ? res.name : `resource ${id}`, at: Date.now() };
                         core.events.emit('market:friendly', { mode, side, resourceId: id, summary });
                         const p = prev[key];
-                        if (p && (summary.count > p.count || summary.amount > p.amount)) {
+                        if (watched && p && (summary.count > p.count || summary.amount > p.amount)) {
                             notify(
                                 `Alliance/friend ${side === 'sell' ? 'sell' : 'buy'} orders in ${next[key].name}: ` +
                                 `${summary.count} (${core.commas(summary.amount)})`,
@@ -280,9 +311,10 @@ export const liveUpdatesModule = {
             leading = true;
             clearTimeout(pollTimer);
             if (pendingPoll) {
-                pendingPoll = false;
+                const opts = pendingPoll;
+                pendingPoll = null;
                 jset(K.nextAt, Date.now());
-                poll();
+                poll(opts);
                 return;
             }
             // Honor the standing schedule — taking over leadership (or
@@ -320,22 +352,23 @@ export const liveUpdatesModule = {
             }
         }
 
-        function requestPollNow() {
+        function requestPollNow(opts) {
+            const req = { visit: (opts && opts.visit) || null };
             if (stopped) return;
-            if (!enabled) { poll(); return; }         // one-shot, no scheduling
+            if (!enabled) { poll(req); return; }      // one-shot, no scheduling
             if (isLeader()) {
                 // Claimed but not yet leading (verify pending): lead now so
                 // poll() reschedules properly afterwards.
-                if (!leading) { pendingPoll = true; startLeading(); return; }
+                if (!leading) { pendingPoll = req; startLeading(); return; }
                 clearTimeout(pollTimer);
-                poll();
+                poll(req);
                 return;
             }
             const rec = leaderRec();
             if (rec && Date.now() - rec.at < LEADER_TTL) {
-                jset(K.pollNow, Date.now());          // ask the live leader
+                jset(K.pollNow, { at: Date.now(), visit: req.visit });   // ask the live leader
             } else {
-                pendingPoll = true;                   // claim and poll ourselves
+                pendingPoll = req;                    // claim and poll ourselves
                 ensureLeader();
             }
         }
@@ -392,7 +425,7 @@ export const liveUpdatesModule = {
         const cdLi = el('li', {}, [el('a', {
             style: 'cursor: pointer;',
             title: 'Time until the next live update (messages, alliance, favourite markets). Click to update now.',
-            onclick: requestPollNow,
+            onclick: () => requestPollNow(),
         }, ['⟳ ', cdText])]);
 
         /* ---------------- wiring ---------------- */
@@ -400,6 +433,10 @@ export const liveUpdatesModule = {
         // Cache-driven UI works on every page, even with live updates off.
         updateMenuBadges();
         core.events.on('live:pollNow', requestPollNow);
+
+        // Handle for the future settings UI (and the console) to toggle
+        // per-market watching: core.marketNotify.enabled/set(mode, side, id).
+        core.marketNotify = { enabled: marketNotifyEnabled, set: setMarketNotify };
 
         window.addEventListener('storage', (ev) => {
             if (stopped || !ev.key) return;
@@ -427,7 +464,11 @@ export const liveUpdatesModule = {
             } else if (ev.key === K.seen) {
                 clampSchedule();
             } else if (ev.key === K.pollNow) {
-                if (isLeader() && enabled) { clearTimeout(pollTimer); poll(); }
+                if (isLeader() && enabled) {
+                    const rec = jget(K.pollNow, null);
+                    clearTimeout(pollTimer);
+                    poll({ visit: (rec && rec.visit) || null });
+                }
             } else if (ev.key === K.leader) {
                 const rec = leaderRec();
                 if (leading && rec && rec.id !== TAB_ID && Date.now() - rec.at < LEADER_TTL) stopLeading();

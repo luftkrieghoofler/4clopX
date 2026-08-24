@@ -173,7 +173,7 @@ export const marketplaceModule = {
         // load is wanted; everywhere else the engine's own schedule rules.
         const loadAndPoll = (resourceId) => {
             (resourceId ? load(resourceId) : Promise.resolve())
-                .then(() => core.events.emit('live:pollNow'));
+                .then(() => core.events.emit('live:pollNow', { visit: { mode, side: state.side } }));
         };
 
         /* ---------------- upkeep (Sell Max) ----------------
@@ -432,7 +432,9 @@ export const marketplaceModule = {
                     'Tab badges count the open orders of your alliance mates and friends (the green/blue names) ' +
                     'on this side of the market: 2(68) means two of them are trading 68 units in total. ' +
                     'Only ★ favourite markets and the currently open one are counted. Each favourite costs one ' +
-                    'extra server request on every load and view change, so try not to spam the server.',
+                    'extra server request on every load and view change, so try not to spam the server. ' +
+                    'Buy orders refresh with the live-update timer and can raise notifications; ' +
+                    'sell-order counts only refresh while you are visiting the sell side.',
                 ]));
                 root.appendChild(help);
             }
@@ -459,8 +461,11 @@ export const marketplaceModule = {
             }, [`${f.count} (${core.commas(f.amount)})`]);
         }
 
-        // Alliance-order total across cached favourites for one side tab.
+        // Alliance-order total across cached favourites for one side tab —
+        // buy orders only (the actionable side); sell listings carry no
+        // total badge.
         function sideTabBadge(side) {
+            if (side !== 'buyer') return null;
             const t = friendlyTotals(mode, side);
             if (!t.orders) return null;
             return el('span', {
@@ -739,6 +744,6 @@ export const marketplaceModule = {
         // nothing rendered yet — load it dynamically, then run a full poll.
         if (state.side === 'buyer') maybeFetchUpkeep();
         if (state.activeId && !state.updatedAt) loadAndPoll(state.activeId);
-        else core.events.emit('live:pollNow');
+        else core.events.emit('live:pollNow', { visit: { mode, side: state.side } });
     },
 };
