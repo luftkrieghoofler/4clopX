@@ -149,6 +149,29 @@ export const marketplaceModule = {
             updateWatchButton();
         });
 
+        // QoL: the open market is effectively watched while it's on screen —
+        // every completed live-update cycle (this tab's poll, or another
+        // tab's, signalled through the badge publish) reloads it and bumps
+        // the "updated" stamp, watched or not.  Skipped while an action is
+        // in flight, right after an own load (covers the pollNow that our
+        // own loads trigger), and while any field holds typed input, since
+        // the re-render would wipe it.
+        function hasPendingInput() {
+            const ae = document.activeElement;
+            if (ae && root.contains(ae) && ae.tagName === 'INPUT') return true;
+            // Text inputs start out empty ('' — place form) or as '1' (the
+            // Buy:/Sell: amount forms); anything else is user-typed.
+            return [...root.querySelectorAll('input[type="text"], input:not([type])')]
+                .some((input) => input.value !== '' && input.value !== '1');
+        }
+
+        core.events.on('live:polled', () => {
+            if (!state.activeId || state.busy) return;
+            if (state.updatedAt && Date.now() - state.updatedAt.getTime() < 5000) return;
+            if (hasPendingInput()) return;
+            load(state.activeId);
+        });
+
 
         /* ---------------- adapter plumbing ---------------- */
 
@@ -467,7 +490,7 @@ export const marketplaceModule = {
                     'Badges appear on 👁 watched markets only — pick those in the ⚙ settings from your ★ ' +
                     'favourites (buy orders are watched by default). Watched markets refresh with every live ' +
                     'update, each costing one request per check, so watch sparingly. Everything else refreshes ' +
-                    'only when you open its tab.',
+                    'only when you open its tab — though the open market keeps auto-refreshing while you view it.',
                 ]));
                 root.appendChild(help);
             }

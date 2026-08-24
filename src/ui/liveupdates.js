@@ -357,8 +357,12 @@ export const liveUpdatesModule = {
                     if (what && c.to > c.from) notify(`${c.to} ${what}`, c.key, c.key);
                 }
                 updateTitle();
-                jset(K.badges, { at: Date.now(), values });
+                // poll:true lets other tabs tell a completed poll cycle
+                // apart from a mere page-load badge publish.
+                jset(K.badges, { at: Date.now(), values, poll: true });
                 await sweepFavourites();
+                // Cycle done — marketplace tabs refresh their open market.
+                core.events.emit('live:polled', {});
             } catch (e) {
                 console.warn('[4clopX] live update failed:', e);
             } finally {
@@ -589,6 +593,7 @@ export const liveUpdatesModule = {
                 if (rec && rec.values) {
                     applyHeaderBadges(rec.values);
                     updateTitle();
+                    if (rec.poll) core.events.emit('live:polled', {});
                 }
             } else if (ev.key === K.friendly) {
                 let oldv = {}, newv = {};
