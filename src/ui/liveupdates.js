@@ -37,11 +37,20 @@ import { headerBadges, applyHeaderBadges, HEADER_PROBE_PAGE } from '../adapters/
 import { isLoggedInDoc, login, CRED_KEY } from '../adapters/session.js';
 import { readFavourites } from '../lib/favourites.js';
 
-// Header badges that raise desktop notifications (the rest update silently).
+// Header badges that raise desktop notifications.  Polls are deliberately
+// excluded from notifications AND the tab title (never urgent); their
+// navbar badge still refreshes like the rest.
 const NOTIFY_BADGES = {
     'messages.php': 'unread messages',
     'myalliance.php': 'unread alliance messages',
+    'deals.php': 'pending deals',
+    'forcesyourway.php': 'incoming attacks',
 };
+
+// One key per stock notification category, for the tab-title tally.  Most
+// counts appear twice in the navbar (menu toggle + submenu link), so only
+// the submenu-link entries are summed to avoid double counting.
+const TITLE_BADGES = Object.keys(NOTIFY_BADGES);
 
 const MODES = ['', 'weapons', 'armor'];
 const K = {
@@ -129,7 +138,14 @@ export const liveUpdatesModule = {
         core.settings.define({
             key: 'live.notify',
             label: 'Desktop notifications while no tab is focused',
-            description: 'Notify about new messages, alliance messages, and alliance orders in favourite markets.',
+            description: 'Notify about new messages, alliance messages, deals, incoming attacks, and alliance orders in favourite markets.',
+            type: 'bool',
+            default: true,
+        });
+        core.settings.define({
+            key: 'live.titleMarket',
+            label: 'Market overview in the tab title',
+            description: 'Show the watched-market buy-order total as "(Mkt: N)" in the browser tab title. The [N] notifications marker is unaffected.',
             type: 'bool',
             default: true,
         });
@@ -184,6 +200,34 @@ export const liveUpdatesModule = {
             const cap = [...document.querySelectorAll('nav.navbar a.dropdown-toggle')]
                 .find((a) => (a.textContent || '').trim().startsWith('Capitalism'));
             if (cap) setMenuBadge(cap, buyTotal);
+            updateTitle();
+        }
+
+        /* ---------------- tab title markers ----------------
+         * "[3] (Mkt: 2) Overview - >CLOP…": [number of DISTINCT pending
+         * notification categories — messages, alliance messages, deals,
+         * incoming attacks; not polls] — a count of things to go check,
+         * not a sum of items (magnitudes across categories aren't
+         * comparable) — shown only when nonzero so a bracket at a glance
+         * means news; and the watched-market buy-order total (same number
+         * as the blue Capitalism badge), always shown. */
+
+        const baseTitle = document.title;
+        function updateTitle() {
+            const badges = headerBadges(document);
+            let notif = 0;
+            for (const key of TITLE_BADGES) {
+                if (badges[key] && badges[key].count > 0) notif += 1;
+            }
+            let market = '';
+            if (core.settings.get('live.titleMarket')) {
+                let orders = 0;
+                for (const [key, v] of Object.entries(readFriendlyCache())) {
+                    if (key.includes('|buyer|')) orders += v.count;
+                }
+                market = `(Mkt: ${orders}) `;
+            }
+            document.title = `${notif ? `[${notif}] ` : ''}${market}${baseTitle}`;
         }
 
         /* ---------------- notifications ---------------- */
@@ -245,6 +289,7 @@ export const liveUpdatesModule = {
                     const what = NOTIFY_BADGES[c.key];
                     if (what && c.to > c.from) notify(`${c.to} ${what}`, c.key, c.key);
                 }
+                updateTitle();
                 jset(K.badges, { at: Date.now(), values });
                 await sweepFavourites(visit);
             } catch (e) {
@@ -452,7 +497,10 @@ export const liveUpdatesModule = {
             if (stopped || !ev.key) return;
             if (ev.key === K.badges) {
                 const rec = jget(K.badges, null);
-                if (rec && rec.values) applyHeaderBadges(rec.values);
+                if (rec && rec.values) {
+                    applyHeaderBadges(rec.values);
+                    updateTitle();
+                }
             } else if (ev.key === K.friendly) {
                 let oldv = {}, newv = {};
                 try { oldv = JSON.parse(ev.oldValue || '{}') || {}; } catch (e) { /* ignore */ }
