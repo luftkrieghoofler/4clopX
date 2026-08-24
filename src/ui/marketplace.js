@@ -116,6 +116,13 @@ export const marketplaceModule = {
             const remembered = core.storage.get(lastKey(hostKind));
             if (remembered && state.resources.some((r) => r.id === remembered)) state.activeId = remembered;
         }
+        // Announce the initial view (merge() keeps this current afterwards).
+        if (state.activeId) {
+            core.events.emit('market:viewing', {
+                mode, side: state.side, resourceId: state.activeId,
+                at: state.updatedAt ? Date.now() : 0,
+            });
+        }
 
         function resourceName(id) {
             const r = state.resources.find((x) => x.id === id);
@@ -134,11 +141,20 @@ export const marketplaceModule = {
         const bold = (text) => el('strong', {}, [text]);
 
         // Live-update sweeps (ui/liveupdates.js, any tab) feed the tab and
-        // side badges as their results arrive.
+        // side badges as their results arrive.  A sweep in THIS tab ships
+        // the full snapshot: if it's the open market, adopt it directly —
+        // the cycle-end live:polled fallback then stands down.
+        let adoptedThisCycle = false;
         core.events.on('market:friendly', (d) => {
             if (d.mode !== mode) return;
             state.friendly[d.side][d.resourceId] = d.summary;
             if (state.busy) return;
+            if (d.snap && d.side === state.side && d.resourceId === state.activeId && !ordersInputPending()) {
+                adoptedThisCycle = true;
+                if (merge(d.snap, { auto: true })) render();
+                else refreshOrdersView();
+                return;
+            }
             if (d.side === state.side) updateBadges();
             updateSideTabBadges();
         });
@@ -149,27 +165,29 @@ export const marketplaceModule = {
             updateWatchButton();
         });
 
-        // QoL: the open market is effectively watched while it's on screen —
-        // every completed live-update cycle (this tab's poll, or another
-        // tab's, signalled through the badge publish) reloads it and bumps
-        // the "updated" stamp, watched or not.  Skipped while an action is
-        // in flight, right after an own load (covers the pollNow that our
-        // own loads trigger), and while any field holds typed input, since
-        // the re-render would wipe it.
-        function hasPendingInput() {
+        // QoL: the open market is effectively watched while it's on screen.
+        // In THIS tab's own poll cycles the sweep includes it (watched or
+        // ad-hoc) and the snapshot is adopted above; live:polled is the
+        // fallback for cycles polled in ANOTHER tab, where only cache
+        // summaries — not full snapshots — cross over.  Skipped while an
+        // action is in flight, right after an own load (covers the pollNow
+        // our own loads trigger), and while an order-row amount field holds
+        // typed input, since rebuilding the table would wipe it.
+        function ordersInputPending() {
             const ae = document.activeElement;
-            if (ae && root.contains(ae) && ae.tagName === 'INPUT') return true;
-            // Text inputs start out empty ('' — place form) or as '1' (the
-            // Buy:/Sell: amount forms); anything else is user-typed.
-            return [...root.querySelectorAll('input[type="text"], input:not([type])')]
-                .some((input) => input.value !== '' && input.value !== '1');
+            if (ae && ordersBox.contains(ae) && ae.tagName === 'INPUT') return true;
+            // Amount inputs start empty; anything non-empty is user-typed.
+            return [...ordersBox.querySelectorAll('input')].some((i) => i.value !== '');
         }
 
         core.events.on('live:polled', () => {
+            const adopted = adoptedThisCycle;
+            adoptedThisCycle = false;
+            if (adopted) return;
             if (!state.activeId || state.busy) return;
             if (state.updatedAt && Date.now() - state.updatedAt.getTime() < 5000) return;
-            if (hasPendingInput()) return;
-            load(state.activeId);
+            if (ordersInputPending()) return;
+            run(() => adapter().load(state.activeId), { auto: true });
         });
 
 
@@ -190,30 +208,44 @@ export const marketplaceModule = {
             }
         }
 
-        function merge(snap) {
+        // opts.auto marks a background refresh: the message area is kept
+        // unless the response actually carries messages.  Returns whether
+        // messages were replaced (the caller then needs a full render).
+        function merge(snap, opts) {
+            const auto = !!(opts && opts.auto);
             state.orders = snap.orders;
             if (snap.funds) state.funds = snap.funds;
             if (snap.mult) state.mult = snap.mult;
             if (snap.resources.length) state.resources = snap.resources;
-            state.messages = snap.messages;
+            const hasMessages = snap.messages.errors.length > 0 || snap.messages.infos.length > 0;
+            const replaceMessages = !auto || hasMessages;
+            if (replaceMessages) state.messages = snap.messages;
             if (snap.resourceId) {
                 state.activeId = snap.resourceId;
                 recordFriendly(snap.kind, snap.resourceId, snap.orders);
                 core.storage.set(lastKey(snap.kind), snap.resourceId);
             }
             state.updatedAt = new Date();
+            // Tell the live-update engine what this tab is looking at, so
+            // its sweeps include the open market (watched or ad-hoc).
+            core.events.emit('market:viewing', { mode, side: snap.kind, resourceId: state.activeId, at: Date.now() });
+            return replaceMessages;
         }
 
-        async function run(action) {
+        async function run(action, opts) {
+            const auto = !!(opts && opts.auto);
             if (state.busy) return;
             setBusy(true);
+            let fullRender = !auto;
             try {
-                merge(await action());
+                if (merge(await action(), opts)) fullRender = true;
             } catch (e) {
                 state.messages = { errors: [String(e.message || e)], infos: [] };
+                fullRender = true;
             } finally {
                 setBusy(false);
-                render();
+                if (fullRender) render();
+                else refreshOrdersView();
             }
         }
 
@@ -359,6 +391,10 @@ export const marketplaceModule = {
 
         const content = document.getElementById('content');
         const root = el('div', { id: 'clop-market-root' });
+        // Persistent container for the orders table, so background
+        // refreshes can rebuild it without touching the place form or the
+        // message area.
+        const ordersBox = el('div', { class: 'clop-orders' });
 
         function multiplierNote() {
             const buyPct = Math.round((state.mult.buy - 1) * 1000) / 10;
@@ -385,7 +421,7 @@ export const marketplaceModule = {
 
             /* toolbar */
             root.appendChild(el('div', { class: 'well well-sm clop-toolbar' }, [
-                el('span', {}, ['Funds: ', el('span', { class: 'text-success' }, [state.funds || '?'])]),
+                el('span', {}, ['Funds: ', el('span', { class: 'text-success clop-funds' }, [state.funds || '?'])]),
                 el('span', { class: 'text-muted', title: multiplierNote() }, [
                     `buy ×${state.mult.buy.toFixed(3).replace(/0+$/, '').replace(/\.$/, '')}` +
                     ` / sell ×${state.mult.sell.toFixed(3).replace(/0+$/, '').replace(/\.$/, '')}`,
@@ -397,7 +433,13 @@ export const marketplaceModule = {
                 el('button', {
                     class: 'btn btn-default btn-sm clop-action',
                     type: 'button',
-                    onclick: () => loadAndPoll(state.activeId),
+                    onclick: () => {
+                        // Partial refresh: reload orders and run a poll, but
+                        // leave the place form and message area untouched.
+                        if (!state.activeId) { core.events.emit('live:pollNow', {}); return; }
+                        run(() => adapter().load(state.activeId), { auto: true })
+                            .then(() => core.events.emit('live:pollNow', {}));
+                    },
                 }, ['⟳ Refresh']),
             ]));
 
@@ -502,7 +544,30 @@ export const marketplaceModule = {
 
             root.appendChild(el('div', { class: 'clop-form-row' },
                 [renderPlaceForm(), watchButton(), favButton()].filter(Boolean)));
-            root.appendChild(renderOrders());
+            root.appendChild(ordersBox);
+            renderOrdersInto();
+        }
+
+        function renderOrdersInto() {
+            ordersBox.textContent = '';
+            ordersBox.appendChild(renderOrders());
+        }
+
+        // Background refresh: rebuild the orders table and patch the funds
+        // and "updated" stamps in place — the place form and message area
+        // stay untouched.
+        function refreshOrdersView() {
+            renderOrdersInto();
+            const funds = root.querySelector('.clop-funds');
+            if (funds) funds.textContent = state.funds || '?';
+            const updated = root.querySelector('.clop-updated');
+            if (updated) {
+                updated.textContent = state.updatedAt
+                    ? `updated ${state.updatedAt.toLocaleTimeString()}`
+                    : 'not loaded yet';
+            }
+            updateBadges();
+            updateSideTabBadges();
         }
 
         // Watched markets carry a persistent indicator — a badge alone can't
@@ -817,7 +882,7 @@ export const marketplaceModule = {
         }
 
         function amountForm(label, btnClass, onAmount, preview) {
-            const input = el('input', { class: 'form-control input-sm', value: '1', type: 'text' });
+            const input = el('input', { class: 'form-control input-sm', type: 'text', placeholder: 'Qty' });
             const note = el('small', { class: 'text-muted clop-amount-note' });
             const updateNote = () => {
                 const n = parseInt(input.value, 10);

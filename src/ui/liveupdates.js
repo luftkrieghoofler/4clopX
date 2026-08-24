@@ -236,6 +236,16 @@ export const liveUpdatesModule = {
         let stopped = false;
         let pendingPoll = false;     // poll requested before this tab led
         let pollTimer = null;
+        let currentView = null;      // {mode, side, resourceId, at} open in THIS tab's marketplace
+
+        // True while THIS tab's marketplace loaded exactly this market a
+        // few seconds ago — marketplace loads trigger a pollNow, so the
+        // sweep must not fetch what the view just fetched.
+        const viewIsFresh = (mode, side, resourceId) => {
+            const v = currentView;
+            return !!v && v.resourceId === resourceId && v.side === side
+                && (v.mode || '') === mode && Date.now() - (v.at || 0) < 8000;
+        };
 
         core.addStyle(`
             .clop-menu-badge { margin-left: 5px; background-color: #5bc0de; color: #fff; }
@@ -386,11 +396,22 @@ export const liveUpdatesModule = {
                     for (const fav of readFavourites(side, mode)) {
                         if (!marketNotifyEnabled(mode, side, fav.id)) continue;
                         const key = `${mode || 'resources'}|${side}|${fav.id}`;
+                        // Just self-loaded by the view whose load triggered
+                        // this poll: its cache entry is already fresh (and
+                        // the baseline advanced), so carry it over.
+                        if (viewIsFresh(mode, side, fav.id)) {
+                            if (prev[key]) next[key] = prev[key];
+                            continue;
+                        }
                         const snap = await marketAdapter(core, side, mode).load(fav.id);
                         const summary = summarizeFriendly(snap.orders);
                         const res = snap.resources.find((r) => r.id === fav.id);
                         next[key] = { ...summary, name: res ? res.name : (fav.name || `resource ${fav.id}`), at: Date.now() };
-                        core.events.emit('market:friendly', { mode, side, resourceId: fav.id, summary });
+                        // snap rides along so a marketplace view of this
+                        // market in THIS tab can adopt the full data instead
+                        // of re-fetching it (cross-tab only the summary
+                        // travels, via the cache).
+                        core.events.emit('market:friendly', { mode, side, resourceId: fav.id, summary, snap });
                         const p = prev[key];
                         if (p && (summary.count > p.count || summary.amount > p.amount)) {
                             notify(
@@ -404,6 +425,28 @@ export const liveUpdatesModule = {
             }
             jset(K.friendly, next);
             core.events.emit('market:friendlyCache', {});
+
+            // Ad-hoc target: the market open in THIS tab's marketplace joins
+            // every sweep even when unwatched, so the view refreshes through
+            // the same snapshot path as watched markets — but it stays out
+            // of the cache and never notifies.  (Watched open markets were
+            // already swept above.)
+            const v = currentView;
+            // Skipped when the view itself just loaded — same rule as the
+            // watched loop above.
+            if (v && v.resourceId
+                && !viewIsFresh(v.mode, v.side, v.resourceId)
+                && !marketNotifyEnabled(v.mode, v.side, v.resourceId)) {
+                try {
+                    const snap = await marketAdapter(core, v.side, v.mode).load(v.resourceId);
+                    core.events.emit('market:friendly', {
+                        mode: v.mode, side: v.side, resourceId: v.resourceId,
+                        summary: summarizeFriendly(snap.orders), snap,
+                    });
+                } catch (e) {
+                    console.warn('[4clopX] open-market refresh failed:', e);
+                }
+            }
         }
 
         /* ---------------- leader election ---------------- */
@@ -543,6 +586,7 @@ export const liveUpdatesModule = {
         updateMenuBadges();
         core.events.on('market:friendlyCache', updateMenuBadges);
         core.events.on('live:pollNow', requestPollNow);
+        core.events.on('market:viewing', (v) => { currentView = v; });
 
         // THE watch-toggle API — the settings panel, the inline market
         // button, and the console all go through here, so every toggle
