@@ -9,7 +9,7 @@
 // core.settings.define() shows up here automatically.
 
 import { isLoggedInDoc } from '../adapters/session.js';
-import { readFavourites } from '../lib/favourites.js';
+import { readFavourites, sortByResourceOrder } from '../lib/favourites.js';
 import { marketNotifyEnabled, setMarketNotify } from './liveupdates.js';
 
 const MODE_LABELS = [['', 'Resources'], ['weapons', 'Weapons'], ['armor', 'Armor']];
@@ -137,7 +137,7 @@ export const settingsModule = {
             const rows = [];
             for (const [mode, modeLabel] of MODE_LABELS) {
                 for (const [side, sideLabel] of SIDE_LABELS) {
-                    const favs = readFavourites(side, mode);
+                    const favs = sortByResourceOrder(mode, readFavourites(side, mode));
                     if (!favs.length) continue;
                     rows.push(el('div', { class: 'clop-setting-group' }, [`${modeLabel} — ${sideLabel}`]));
                     for (const fav of favs) {

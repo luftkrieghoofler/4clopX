@@ -24,3 +24,34 @@ export function favouriteIds(side, mode) {
 export function writeFavourites(side, mode, favs) {
     try { localStorage.setItem(key(side, mode), JSON.stringify([...favs])); } catch (e) { /* ignore */ }
 }
+
+// Server-side resource order — the order of the marketplace <select>
+// options, cached per mode and refreshed on every market page load.  It
+// barely ever changes, so the cache is safe long-term; it's used to sort
+// favourite lists the way the server lists resources.
+const orderKey = (mode) => `clopx.market.resourceOrder.${mode || 'resources'}`;
+
+export function writeResourceOrder(mode, ids) {
+    try { localStorage.setItem(orderKey(mode), JSON.stringify([...ids])); } catch (e) { /* ignore */ }
+}
+
+export function readResourceOrder(mode) {
+    try {
+        const v = JSON.parse(localStorage.getItem(orderKey(mode)) || '[]');
+        return Array.isArray(v) ? v : [];
+    } catch (e) {
+        return [];
+    }
+}
+
+// Sort {id, name} entries into server resource order; ids the cache hasn't
+// seen sort last, by name (which approximates the server's name ordering).
+export function sortByResourceOrder(mode, favs) {
+    const index = new Map(readResourceOrder(mode).map((id, i) => [id, i]));
+    return [...favs].sort((a, b) => {
+        const ai = index.has(a.id) ? index.get(a.id) : Infinity;
+        const bi = index.has(b.id) ? index.get(b.id) : Infinity;
+        if (ai !== bi) return ai - bi;
+        return String(a.name || '').localeCompare(String(b.name || ''));
+    });
+}

@@ -14,9 +14,10 @@ import {
 } from '../adapters/market.js';
 import { fetchResourceStats } from '../adapters/overview.js';
 import {
-    readFriendlyCache, friendlyTotals, writeFriendlyCacheEntry, marketNotifyEnabled, forgetMarket,
+    readFriendlyCache, friendlyTotals, writeFriendlyCacheEntry,
+    marketNotifyEnabled, setMarketNotify, forgetMarket,
 } from './liveupdates.js';
-import { favouriteIds, writeFavourites } from '../lib/favourites.js';
+import { favouriteIds, writeFavourites, writeResourceOrder } from '../lib/favourites.js';
 
 const SIDES = [
     { side: 'sell', label: 'Sell Orders', hint: 'Listings from sellers — buy from them here.' },
@@ -104,6 +105,9 @@ export const marketplaceModule = {
         if (boot.mult) state.mult = boot.mult;
         state.resources = boot.resources;
         state.orders = boot.orders;
+        // Cache the server's resource order (used to sort favourite lists,
+        // e.g. in the settings panel).
+        if (state.resources.length) writeResourceOrder(mode, state.resources.map((r) => r.id));
         if (boot.resourceId) {
             state.activeId = boot.resourceId;
             recordFriendly(hostKind, boot.resourceId, boot.orders);
@@ -471,7 +475,8 @@ export const marketplaceModule = {
                 return;
             }
 
-            root.appendChild(el('div', { class: 'clop-form-row' }, [renderPlaceForm(), favButton()]));
+            root.appendChild(el('div', { class: 'clop-form-row' },
+                [renderPlaceForm(), watchButton(), favButton()].filter(Boolean)));
             root.appendChild(renderOrders());
         }
 
@@ -562,6 +567,31 @@ export const marketplaceModule = {
                     render();
                 },
             }, [fav ? '★ Unfavourite Market' : '☆ Favourite Market']);
+        }
+
+        // Inline watch toggle, left of the ★ button — quick per-market
+        // control; the settings panel is the centralised overview.  Only
+        // rendered for favourites: its absence reinforces that only ★
+        // favourites can be watched, discoverability is covered by
+        // buy-side favourites being watched by default, and sitting on the
+        // LEFT means appearing/disappearing shifts no other element.
+        function watchButton() {
+            if (!favs().has(state.activeId)) return null;
+            const watched = marketNotifyEnabled(mode, state.side, state.activeId);
+            return el('button', {
+                class: `btn btn-sm ${watched ? 'btn-info' : 'btn-default'} clop-action`,
+                type: 'button',
+                title: watched
+                    ? 'Stop auto-refreshing this market with live updates'
+                    : 'Auto-refresh this market with live updates, count it in the blue badges, and notify on new alliance orders',
+                onclick: () => {
+                    const on = !watched;
+                    setMarketNotify(mode, state.side, state.activeId, on);
+                    if (on) recordFriendly(state.side, state.activeId, state.orders);
+                    core.events.emit('market:friendlyCache', {});
+                    render();
+                },
+            }, [watched ? '👁 Unwatch' : '👁 Watch']);
         }
 
         /* list / offer form for the active resource */
