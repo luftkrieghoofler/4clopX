@@ -1,8 +1,12 @@
 import { core } from './core.js';
 import { autologinModule } from './ui/autologin.js';
 import { marketplaceModule } from './ui/marketplace.js';
+import { liveUpdatesModule } from './ui/liveupdates.js';
 
+// liveupdates before marketplace: marketplace pages emit "live:pollNow"
+// during init, so the listener must already exist.
 core.register(autologinModule);
+core.register(liveUpdatesModule);
 core.register(marketplaceModule);
 core.boot();
 

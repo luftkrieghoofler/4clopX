@@ -9,10 +9,11 @@
 // same view.
 
 import {
-    createMarketAdapter, kindFromLocation, marketPageUrl, parseToken, parseMode,
-    marketIsEmpty, hideStockMarketUi, stockUiInsertionPoint,
+    marketAdapter, kindFromLocation, marketPageUrl, parseToken, parseMode,
+    marketIsEmpty, hideStockMarketUi, stockUiInsertionPoint, summarizeFriendly,
 } from '../adapters/market.js';
 import { fetchResourceStats } from '../adapters/overview.js';
+import { readFriendlyCache, friendlyTotals } from './liveupdates.js';
 
 const SIDES = [
     { side: 'sell', label: 'Sell Orders', hint: 'Listings from sellers — buy from them here.' },
@@ -44,10 +45,13 @@ export const marketplaceModule = {
             default: true,
         });
 
+        // Shared instances (the liveupdates module sweeps through the same
+        // ones, so the single-use tokens stay coherent within this tab).
         const adapters = {
-            sell: createMarketAdapter(core, 'sell', mode, hostKind === 'sell' ? document : null),
-            buyer: createMarketAdapter(core, 'buyer', mode, hostKind === 'buyer' ? document : null),
+            sell: marketAdapter(core, 'sell', mode),
+            buyer: marketAdapter(core, 'buyer', mode),
         };
+        adapters[hostKind].seed(document);
 
         // Last-visited resource is remembered per side (and per mode), so the
         // sell and buy tabs each restore their own market.
@@ -79,6 +83,13 @@ export const marketplaceModule = {
         try { state.favs = new Set(JSON.parse(core.storage.get(FAVS_KEY, '[]'))); } catch (e) { /* corrupt value */ }
         const saveFavs = () => core.storage.set(FAVS_KEY, JSON.stringify([...state.favs]));
 
+        // Warm the alliance-order store from the shared live-update cache,
+        // so favourite badges show instantly without a sweep.
+        for (const [key, v] of Object.entries(readFriendlyCache())) {
+            const [m, side, id] = key.split('|');
+            if (m === (mode || 'resources')) state.friendly[side][id] = { count: v.count, amount: v.amount };
+        }
+
         const boot = adapters[hostKind].snapshotFromDocument(document);
         state.funds = boot.funds;
         if (boot.mult) state.mult = boot.mult;
@@ -109,19 +120,18 @@ export const marketplaceModule = {
         // stand out against the auxiliary price info around them.
         const bold = (text) => el('strong', {}, [text]);
 
-        // Orders from alliance mates (green) or friends (blue), per the
-        // server's own styling; own orders excluded.  (Friend styling
-        // overrides alliance styling server-side, which is why both count.)
-        function summarizeFriendly(orders) {
-            let amount = 0, count = 0;
-            for (const o of orders) {
-                if (!o.own && (o.relation === 'alliance' || o.relation === 'friend')) {
-                    amount += o.amount;
-                    count += 1;
-                }
-            }
-            return { amount, count };
-        }
+        // Live-update sweeps (ui/liveupdates.js, any tab) feed the tab and
+        // side badges as their results arrive.
+        core.events.on('market:friendly', (d) => {
+            if (d.mode !== mode) return;
+            state.friendly[d.side][d.resourceId] = d.summary;
+            if (state.busy) return;
+            if (d.side === state.side) updateBadges();
+            updateSideTabBadges();
+        });
+        core.events.on('market:friendlyCache', () => {
+            if (!state.busy) updateSideTabBadges();
+        });
 
         /* ---------------- adapter plumbing ---------------- */
 
@@ -156,36 +166,14 @@ export const marketplaceModule = {
 
         const load = (resourceId) => run(() => adapter().load(resourceId));
 
-        // Refresh the alliance/friend badge counts for all favourite markets
-        // on the current side — one POST per favourite (the open market is
-        // skipped; its counts come with every regular response).  There is
-        // deliberately no caching: this runs on boot, Refresh, and side
-        // switches only — a market tab click refreshes just the clicked
-        // market's own badge — and a newer sweep or a side switch aborts an
-        // older one.
-        let sweepSeq = 0;
-        async function sweepFavourites() {
-            const seq = ++sweepSeq;
-            const side = state.side;
-            const targets = [...state.favs]
-                .filter((id) => id !== state.activeId && state.resources.some((r) => r.id === id));
-            for (const id of targets) {
-                if (seq !== sweepSeq || state.side !== side) return; // superseded
-                try {
-                    const snap = await adapters[side].load(id);
-                    state.friendly[side][id] = summarizeFriendly(snap.orders);
-                    if (snap.resources.length) state.resources = snap.resources;
-                    updateBadges();
-                } catch (e) {
-                    console.warn('[CLOP-US] favourites sweep stopped:', e);
-                    return;
-                }
-            }
-        }
-
-        const loadAndSweep = (resourceId) => {
-            if (resourceId) load(resourceId).then(sweepFavourites);
-            else sweepFavourites();
+        // Fresh data on market page load / Refresh / side switch: reload
+        // the open market, then ask the live-update engine (ui/liveupdates.js)
+        // for a full poll — favourites sweep plus header badges — with a
+        // timer reset.  Market pages are the one place where sweeping on
+        // load is wanted; everywhere else the engine's own schedule rules.
+        const loadAndPoll = (resourceId) => {
+            (resourceId ? load(resourceId) : Promise.resolve())
+                .then(() => core.events.emit('live:pollNow'));
         };
 
         /* ---------------- upkeep (Sell Max) ----------------
@@ -283,7 +271,7 @@ export const marketplaceModule = {
             try { history.replaceState(null, '', marketPageUrl(side, mode)); } catch (e) { /* ignore */ }
             render();
             if (side === 'buyer') maybeFetchUpkeep();
-            loadAndSweep(state.activeId);
+            loadAndPoll(state.activeId);
         }
 
         /* ---------------- UI ---------------- */
@@ -330,11 +318,16 @@ export const marketplaceModule = {
             root.textContent = '';
             root.classList.toggle('clop-busy', state.busy);
 
-            /* side tabs: sell orders vs buy orders */
-            root.appendChild(el('ul', { class: 'nav nav-tabs clop-side-tabs' }, SIDES.map(({ side, label, hint }) =>
-                el('li', { class: state.side === side ? 'active clop-action' : 'clop-action' }, [
-                    el('a', { title: hint, onclick: () => switchSide(side) }, [label]),
-                ]))));
+            /* side tabs: sell orders vs buy orders, with alliance-order totals */
+            root.appendChild(el('ul', { class: 'nav nav-tabs clop-side-tabs' }, SIDES.map(({ side, label, hint }) => {
+                const a = el('a', { title: hint, onclick: () => switchSide(side) }, [label]);
+                const badge = sideTabBadge(side);
+                if (badge) a.appendChild(badge);
+                return el('li', {
+                    class: state.side === side ? 'active clop-action' : 'clop-action',
+                    'data-side': side,
+                }, [a]);
+            })));
 
             /* toolbar */
             root.appendChild(el('div', { class: 'well well-sm clop-toolbar' }, [
@@ -350,7 +343,7 @@ export const marketplaceModule = {
                 el('button', {
                     class: 'btn btn-default btn-sm clop-action',
                     type: 'button',
-                    onclick: () => loadAndSweep(state.activeId),
+                    onclick: () => loadAndPoll(state.activeId),
                 }, ['⟳ Refresh']),
             ]));
 
@@ -464,6 +457,27 @@ export const marketplaceModule = {
                 class: 'badge clop-friendly-badge',
                 title: `${f.count} alliance/friend order${f.count === 1 ? '' : 's'} ${what} ${core.commas(f.amount)} total`,
             }, [`${f.count} (${core.commas(f.amount)})`]);
+        }
+
+        // Alliance-order total across cached favourites for one side tab.
+        function sideTabBadge(side) {
+            const t = friendlyTotals(mode, side);
+            if (!t.orders) return null;
+            return el('span', {
+                class: 'badge clop-menu-badge',
+                title: `${t.orders} alliance/friend order${t.orders === 1 ? '' : 's'} ` +
+                    `(${core.commas(t.amount)} units) across your favourite markets`,
+            }, [String(t.orders)]);
+        }
+
+        function updateSideTabBadges() {
+            for (const li of root.querySelectorAll('.clop-side-tabs li[data-side]')) {
+                const a = li.querySelector('a');
+                const old = a.querySelector('.clop-menu-badge');
+                if (old) old.remove();
+                const badge = sideTabBadge(li.getAttribute('data-side'));
+                if (badge) a.appendChild(badge);
+            }
         }
 
         // Patch badges into the existing tabs without a full render — a
@@ -722,9 +736,9 @@ export const marketplaceModule = {
         render();
 
         // Orders only come with POST responses, so a remembered resource has
-        // nothing rendered yet — load it dynamically, then sweep favourites.
+        // nothing rendered yet — load it dynamically, then run a full poll.
         if (state.side === 'buyer') maybeFetchUpkeep();
-        if (state.activeId && !state.updatedAt) loadAndSweep(state.activeId);
-        else sweepFavourites();
+        if (state.activeId && !state.updatedAt) loadAndPoll(state.activeId);
+        else core.events.emit('live:pollNow');
     },
 };

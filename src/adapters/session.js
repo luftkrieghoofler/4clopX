@@ -13,6 +13,11 @@
 //   - The server rate-limits FAILED logins (>20 per IP per 2 hours), so
 //     callers must never loop on a failed login.
 
+// Where core.secrets keeps the auto-login credentials
+// ({username, password, disabled?}) — shared by ui/autologin.js (login
+// screen) and ui/liveupdates.js (background session recovery).
+export const CRED_KEY = 'credentials';
+
 export function isLoggedInDoc(doc) {
     return !!doc.querySelector('a[href="logout.php"]');
 }

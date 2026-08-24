@@ -1,0 +1,470 @@
+// Live updates: periodically checks for news without a page reload —
+//   * header notification badges (messages, alliance messages, deals,
+//     incoming attacks, polls) via one GET of a cheap page whose header
+//     the server renders with all counts, and
+//   * alliance/friend orders in favourite markets (both sides, every mode
+//     with favourites), via the market sweep.
+//
+// CROSS-TAB DESIGN: exactly one tab — the elected leader — polls; all
+// state is shared through localStorage and `storage` events:
+//   clopus.live.leader    {id, at}         heartbeat of the leader tab
+//   clopus.live.nextAt    number           when the next poll is due
+//   clopus.live.pollNow   number           "poll immediately" signal
+//   clopus.live.seen      number           last time any tab was visible
+//   clopus.live.badges    {at, values}     last header badge values
+//   clopus.live.friendly  {key: {...}}     the friendly-order cache, keyed
+//                                          "mode|side|resourceId" (mode ''
+//                                          is stored as "resources")
+//
+// The friendly cache persists across navigations, so page loads neither
+// re-run the sweep nor reset notification baselines; the poll timer also
+// persists (nextAt), so a page load never resets the schedule.  The one
+// exception is deliberate: marketplace pages emit "live:pollNow" on
+// load / Refresh / side switch — there the user explicitly wants fresh
+// market data, so a full poll runs and the timer restarts.
+//
+// The cache also powers alliance-order badges on the Capitalism menu (the
+// grand total) and on each marketplace submenu entry (that mode+side's
+// total), on every page.
+//
+// Desktop notifications fire only when no tab is visible/focused, from the
+// leader.  If the session expires in the background, the poll re-logs-in
+// with the stored auto-login credentials (same lockout rules as
+// ui/autologin.js) or stops rather than loop.
+
+import { marketAdapter, marketPageUrl, summarizeFriendly } from '../adapters/market.js';
+import { headerBadges, applyHeaderBadges, HEADER_PROBE_PAGE } from '../adapters/header.js';
+import { isLoggedInDoc, login, CRED_KEY } from '../adapters/session.js';
+
+// Header badges that raise desktop notifications (the rest update silently).
+const NOTIFY_BADGES = {
+    'messages.php': 'unread messages',
+    'myalliance.php': 'unread alliance messages',
+};
+
+const MODES = ['', 'weapons', 'armor'];
+const K = {
+    leader: 'clopus.live.leader',
+    nextAt: 'clopus.live.nextAt',
+    pollNow: 'clopus.live.pollNow',
+    seen: 'clopus.live.seen',
+    badges: 'clopus.live.badges',
+    friendly: 'clopus.live.friendly',
+};
+
+function jget(key, fallback) {
+    try {
+        const v = localStorage.getItem(key);
+        return v === null ? fallback : JSON.parse(v);
+    } catch (e) {
+        return fallback;
+    }
+}
+function jset(key, value) {
+    try { localStorage.setItem(key, JSON.stringify(value)); } catch (e) { /* ignore */ }
+}
+
+// The shared friendly-order cache (favourite markets only).
+export function readFriendlyCache() {
+    return jget(K.friendly, {}) || {};
+}
+
+// Totals across the cached favourite markets of one mode+side.
+export function friendlyTotals(mode, side) {
+    const prefix = `${mode || 'resources'}|${side}|`;
+    let orders = 0, amount = 0;
+    for (const [key, v] of Object.entries(readFriendlyCache())) {
+        if (key.startsWith(prefix)) { orders += v.count; amount += v.amount; }
+    }
+    return { orders, amount };
+}
+
+export const liveUpdatesModule = {
+    name: 'liveupdates',
+
+    matches: () => true,
+
+    init(core) {
+        core.settings.define({
+            key: 'live.enabled',
+            label: 'Live updates (messages, alliance, favourite markets)',
+            description: 'Periodically check for new messages, alliance messages, and alliance orders in favourite markets, updating the header badges in place.',
+            type: 'bool',
+            default: true,
+        });
+        core.settings.define({
+            key: 'live.intervalFocused',
+            label: 'Live update interval while a tab is visible (seconds)',
+            description: 'How often to check while some game tab is being looked at.',
+            type: 'number',
+            default: 30,
+        });
+        core.settings.define({
+            key: 'live.intervalBlurred',
+            label: 'Live update interval in the background (seconds)',
+            description: 'How often to check while no game tab is visible.',
+            type: 'number',
+            default: 120,
+        });
+        core.settings.define({
+            key: 'live.notify',
+            label: 'Desktop notifications while no tab is focused',
+            description: 'Notify about new messages, alliance messages, and alliance orders in favourite markets.',
+            type: 'bool',
+            default: true,
+        });
+
+        if (!isLoggedInDoc(document)) return;
+
+        const el = core.el.bind(core);
+        const enabled = core.settings.get('live.enabled');
+        const TAB_ID = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+        const LEADER_TTL = 35000;
+        const ENSURE_EVERY = 10000;
+
+        let leading = false;
+        let polling = false;
+        let stopped = false;
+        let pendingPoll = false;
+        let pollTimer = null;
+
+        core.addStyle(`
+            .clop-menu-badge { margin-left: 5px; background-color: #5bc0de; color: #fff; }
+        `);
+
+        /* ---------------- alliance-order menu badges ---------------- */
+
+        function setMenuBadge(a, count) {
+            let b = a.querySelector(':scope > .clop-menu-badge');
+            if (!count) {
+                if (b) b.remove();
+                return;
+            }
+            if (!b) {
+                b = el('span', {
+                    class: 'badge clop-menu-badge',
+                    title: 'Alliance/friend orders in favourite markets',
+                });
+                a.insertBefore(b, a.querySelector(':scope > b.caret'));
+            }
+            b.textContent = String(count);
+        }
+
+        function updateMenuBadges() {
+            let grandTotal = 0;
+            for (const v of Object.values(readFriendlyCache())) grandTotal += v.count;
+            for (const a of document.querySelectorAll(
+                'nav.navbar a[href^="marketplace.php"], nav.navbar a[href^="buyermarketplace.php"]')) {
+                const url = new URL(a.getAttribute('href'), location.href);
+                const mode = url.searchParams.get('mode') || '';
+                const side = url.pathname.includes('buyermarketplace') ? 'buyer' : 'sell';
+                setMenuBadge(a, friendlyTotals(mode, side).orders);
+            }
+            const cap = [...document.querySelectorAll('nav.navbar a.dropdown-toggle')]
+                .find((a) => (a.textContent || '').trim().startsWith('Capitalism'));
+            if (cap) setMenuBadge(cap, grandTotal);
+        }
+
+        /* ---------------- notifications ---------------- */
+
+        const stampSeen = () => { if (!document.hidden) jset(K.seen, Date.now()); };
+        const anyoneLooking = () =>
+            (!document.hidden && document.hasFocus()) || Date.now() - (jget(K.seen, 0) || 0) < 25000;
+
+        function notify(body, href, tag) {
+            if (!core.settings.get('live.notify')) return;
+            if (anyoneLooking()) return;
+            if (typeof Notification === 'undefined' || Notification.permission !== 'granted') return;
+            try {
+                const n = new Notification('CLOP', { body, tag: `clopus-${tag}` });
+                n.onclick = () => {
+                    try { window.focus(); if (href) location.assign(href); n.close(); } catch (e) { /* ignore */ }
+                };
+            } catch (e) { /* notification construction can throw on some platforms */ }
+        }
+
+        /* ---------------- session recovery ---------------- */
+
+        async function tryRelogin() {
+            try {
+                if (!core.settings.get('autologin.enabled') || !core.secrets.available()) return false;
+                const creds = await core.secrets.get(CRED_KEY);
+                if (!creds || !creds.username || creds.disabled) return false;
+                const r = await login(core, creds.username, creds.password);
+                if (r.ok) {
+                    console.info('[CLOP-US] live updates: session re-established');
+                    return true;
+                }
+                if (/login incorrect/i.test(r.errors[0] || '')) {
+                    await core.secrets.set(CRED_KEY, { ...creds, disabled: true });
+                }
+                return false;
+            } catch (e) {
+                return false;
+            }
+        }
+
+        /* ---------------- the poll ---------------- */
+
+        async function poll() {
+            if (polling || stopped) return;
+            polling = true;
+            try {
+                let doc = await core.http.getDoc(HEADER_PROBE_PAGE);
+                if (!isLoggedInDoc(doc)) {
+                    if (!(await tryRelogin())) {
+                        stop('session expired — reload the page to log in');
+                        return;
+                    }
+                    doc = await core.http.getDoc(HEADER_PROBE_PAGE);
+                }
+                const values = headerBadges(doc);
+                for (const c of applyHeaderBadges(values)) {
+                    const what = NOTIFY_BADGES[c.key];
+                    if (what && c.to > c.from) notify(`${c.to} ${what}`, c.key, c.key);
+                }
+                jset(K.badges, { at: Date.now(), values });
+                await sweepFavourites();
+            } catch (e) {
+                console.warn('[CLOP-US] live update failed:', e);
+            } finally {
+                polling = false;
+                if (!stopped) schedule();
+            }
+        }
+
+        // One request per favourite market per side; the previous cache is
+        // the notification baseline (first-ever sweep of a market is
+        // silent).  The cache is rebuilt wholesale so unfavourited markets
+        // drop out, and written only after a fully successful sweep.
+        async function sweepFavourites() {
+            const prev = readFriendlyCache();
+            const next = {};
+            for (const mode of MODES) {
+                let favs = [];
+                try { favs = JSON.parse(core.storage.get(`clopus.market.favs.${mode || 'resources'}`, '[]')); } catch (e) { /* ignore */ }
+                for (const side of ['sell', 'buyer']) {
+                    for (const id of favs) {
+                        const snap = await marketAdapter(core, side, mode).load(id);
+                        const summary = summarizeFriendly(snap.orders);
+                        const res = snap.resources.find((r) => r.id === id);
+                        const key = `${mode || 'resources'}|${side}|${id}`;
+                        next[key] = { ...summary, name: res ? res.name : `resource ${id}`, at: Date.now() };
+                        core.events.emit('market:friendly', { mode, side, resourceId: id, summary });
+                        const p = prev[key];
+                        if (p && (summary.count > p.count || summary.amount > p.amount)) {
+                            notify(
+                                `Alliance/friend ${side === 'sell' ? 'sell' : 'buy'} orders in ${next[key].name}: ` +
+                                `${summary.count} (${core.commas(summary.amount)})`,
+                                marketPageUrl(side, mode),
+                                `market-${key}`);
+                        }
+                    }
+                }
+            }
+            jset(K.friendly, next);
+            core.events.emit('market:friendlyCache', {});
+            updateMenuBadges();
+        }
+
+        /* ---------------- leader election ---------------- */
+
+        const leaderRec = () => jget(K.leader, null);
+        const isLeader = () => {
+            const r = leaderRec();
+            return !!r && r.id === TAB_ID;
+        };
+
+        function startLeading() {
+            if (leading || stopped || !enabled) return;
+            leading = true;
+            clearTimeout(pollTimer);
+            if (pendingPoll) {
+                pendingPoll = false;
+                jset(K.nextAt, Date.now());
+                poll();
+                return;
+            }
+            // Honor the standing schedule — taking over leadership (or
+            // loading a page) is not a reason to poll early.
+            const storedNext = jget(K.nextAt, 0) || 0;
+            if (storedNext) {
+                const delay = Math.max(2000, storedNext - Date.now());
+                jset(K.nextAt, Date.now() + delay);
+                pollTimer = setTimeout(poll, delay);
+            } else {
+                schedule();
+            }
+        }
+
+        function stopLeading() {
+            leading = false;
+            clearTimeout(pollTimer);
+        }
+
+        function ensureLeader() {
+            if (stopped || !enabled) return;
+            const rec = leaderRec();
+            if (rec && rec.id === TAB_ID) {
+                jset(K.leader, { id: TAB_ID, at: Date.now() });     // heartbeat
+                if (!leading) startLeading();
+                return;
+            }
+            if (!rec || Date.now() - rec.at > LEADER_TTL) {
+                jset(K.leader, { id: TAB_ID, at: Date.now() });     // claim
+                // Verify after a beat so simultaneous claimants resolve to
+                // whoever wrote last.
+                setTimeout(() => { if (isLeader()) startLeading(); }, 300 + Math.floor(Math.random() * 400));
+            } else if (leading) {
+                stopLeading();                                      // superseded
+            }
+        }
+
+        function requestPollNow() {
+            if (stopped) return;
+            if (!enabled) { poll(); return; }         // one-shot, no scheduling
+            if (isLeader()) {
+                // Claimed but not yet leading (verify pending): lead now so
+                // poll() reschedules properly afterwards.
+                if (!leading) { pendingPoll = true; startLeading(); return; }
+                clearTimeout(pollTimer);
+                poll();
+                return;
+            }
+            const rec = leaderRec();
+            if (rec && Date.now() - rec.at < LEADER_TTL) {
+                jset(K.pollNow, Date.now());          // ask the live leader
+            } else {
+                pendingPoll = true;                   // claim and poll ourselves
+                ensureLeader();
+            }
+        }
+
+        /* ---------------- scheduling & countdown ---------------- */
+
+        function intervalMs() {
+            const key = anyoneLooking() ? 'live.intervalFocused' : 'live.intervalBlurred';
+            const s = core.settings.get(key);
+            return Math.max(10, Number.isFinite(s) && s > 0 ? s : 30) * 1000;
+        }
+
+        function schedule() {
+            if (!leading || !enabled || stopped) return;
+            clearTimeout(pollTimer);
+            const ms = intervalMs();
+            jset(K.nextAt, Date.now() + ms);
+            pollTimer = setTimeout(poll, ms);
+        }
+
+        // Pull the next poll closer when attention warrants it — never push
+        // it out.  Runs when this tab's visibility changes AND when any
+        // other tab reports becoming visible (its K.seen stamp), so a
+        // hidden leader tightens the cadence for a newly-visible follower
+        // instead of letting the long countdown run its course.
+        function clampSchedule() {
+            if (!leading || stopped || polling) return;
+            const now = Date.now();
+            const nextAt = jget(K.nextAt, 0) || 0;
+            if (nextAt && nextAt <= now) {
+                // Overdue — the timer was throttled while hidden.
+                clearTimeout(pollTimer);
+                poll();
+                return;
+            }
+            const target = Math.min(nextAt || Infinity, now + intervalMs());
+            if (nextAt && target >= nextAt) return;   // already due sooner
+            clearTimeout(pollTimer);
+            jset(K.nextAt, target);
+            pollTimer = setTimeout(poll, Math.max(0, target - now));
+        }
+
+        function stop(reason) {
+            stopped = true;
+            clearTimeout(pollTimer);
+            if (isLeader()) { try { localStorage.removeItem(K.leader); } catch (e) { /* ignore */ } }
+            cdText.textContent = '✖';
+            cdText.className = 'text-danger';
+            cdLi.querySelector('a').title = `Live updates stopped: ${reason}`;
+            console.warn(`[CLOP-US] live updates stopped: ${reason}`);
+        }
+
+        const cdText = el('span', { class: 'text-info' }, ['—']);
+        const cdLi = el('li', {}, [el('a', {
+            style: 'cursor: pointer;',
+            title: 'Time until the next live update (messages, alliance, favourite markets). Click to update now.',
+            onclick: requestPollNow,
+        }, ['⟳ ', cdText])]);
+
+        /* ---------------- wiring ---------------- */
+
+        // Cache-driven UI works on every page, even with live updates off.
+        updateMenuBadges();
+        core.events.on('live:pollNow', requestPollNow);
+
+        window.addEventListener('storage', (ev) => {
+            if (stopped || !ev.key) return;
+            if (ev.key === K.badges) {
+                const rec = jget(K.badges, null);
+                if (rec && rec.values) applyHeaderBadges(rec.values);
+            } else if (ev.key === K.friendly) {
+                let oldv = {}, newv = {};
+                try { oldv = JSON.parse(ev.oldValue || '{}') || {}; } catch (e) { /* ignore */ }
+                try { newv = JSON.parse(ev.newValue || '{}') || {}; } catch (e) { /* ignore */ }
+                for (const [key, v] of Object.entries(newv)) {
+                    const o = oldv[key];
+                    if (!o || o.count !== v.count || o.amount !== v.amount) {
+                        const [m, side, resourceId] = key.split('|');
+                        core.events.emit('market:friendly', {
+                            mode: m === 'resources' ? '' : m,
+                            side,
+                            resourceId,
+                            summary: { count: v.count, amount: v.amount },
+                        });
+                    }
+                }
+                core.events.emit('market:friendlyCache', {});
+                updateMenuBadges();
+            } else if (ev.key === K.seen) {
+                clampSchedule();
+            } else if (ev.key === K.pollNow) {
+                if (isLeader() && enabled) { clearTimeout(pollTimer); poll(); }
+            } else if (ev.key === K.leader) {
+                const rec = leaderRec();
+                if (leading && rec && rec.id !== TAB_ID && Date.now() - rec.at < LEADER_TTL) stopLeading();
+            }
+        });
+
+        if (!enabled) return;
+
+        // Browsers only allow the permission prompt on a user gesture.
+        if (core.settings.get('live.notify')
+            && typeof Notification !== 'undefined' && Notification.permission === 'default') {
+            document.addEventListener('click', () => Notification.requestPermission(), { once: true, capture: true });
+        }
+
+        const navRight = document.querySelector('nav.navbar ul.navbar-right');
+        if (navRight) navRight.insertBefore(cdLi, navRight.firstElementChild);
+
+        setInterval(() => {
+            if (stopped) return;
+            if (polling) { cdText.textContent = '…'; return; }
+            const nextAt = jget(K.nextAt, 0) || 0;
+            const s = Math.max(0, Math.round((nextAt - Date.now()) / 1000));
+            cdText.textContent = `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
+        }, 1000);
+
+        stampSeen();
+        setInterval(stampSeen, ENSURE_EVERY);
+        document.addEventListener('visibilitychange', () => {
+            stampSeen();
+            clampSchedule();
+        });
+
+        window.addEventListener('pagehide', () => {
+            if (isLeader()) { try { localStorage.removeItem(K.leader); } catch (e) { /* ignore */ } }
+        });
+
+        setInterval(ensureLeader, ENSURE_EVERY);
+        ensureLeader();
+    },
+};

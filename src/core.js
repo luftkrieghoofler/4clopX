@@ -111,6 +111,10 @@ export const core = {
             const raw = core.storage.get(`clopus.setting.${key}`);
             if (raw === null) return def ? def.default : null;
             if (def && def.type === 'bool') return raw === '1';
+            if (def && def.type === 'number') {
+                const n = Number(raw);
+                return Number.isFinite(n) ? n : def.default;
+            }
             return raw;
         },
 
@@ -118,6 +122,23 @@ export const core = {
             const def = this._defs.get(key);
             const raw = def && def.type === 'bool' ? (value ? '1' : '0') : String(value);
             core.storage.set(`clopus.setting.${key}`, raw);
+        },
+    },
+
+    /* ---------------- events ----------------
+     * Minimal pub/sub so modules can share data without importing each
+     * other (e.g. the live-update sweep feeding marketplace tab badges). */
+
+    events: {
+        _handlers: new Map(),
+        on(type, fn) {
+            if (!this._handlers.has(type)) this._handlers.set(type, []);
+            this._handlers.get(type).push(fn);
+        },
+        emit(type, data) {
+            for (const fn of this._handlers.get(type) || []) {
+                try { fn(data); } catch (e) { console.error(`[CLOP-US] event handler for "${type}" failed:`, e); }
+            }
         },
     },
 

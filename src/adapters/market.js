@@ -180,6 +180,20 @@ export function stockUiInsertionPoint(content) {
     return content.querySelector(':scope > center, :scope > form, :scope > table') || null;
 }
 
+// Orders from alliance mates (green) or friends (blue), per the server's
+// own styling; own orders excluded.  (Friend styling overrides alliance
+// styling server-side, which is why both count.)
+export function summarizeFriendly(orders) {
+    let amount = 0, count = 0;
+    for (const o of orders) {
+        if (!o.own && (o.relation === 'alliance' || o.relation === 'friend')) {
+            amount += o.amount;
+            count += 1;
+        }
+    }
+    return { amount, count };
+}
+
 /* ------------------------- the adapter ------------------------- */
 
 const isTryAgain = (html) => /^\s*Try again\.?\s*$/i.test(html.replace(/<[^>]*>/g, ''));
@@ -240,6 +254,12 @@ export function createMarketAdapter(core, kind, mode, seedDoc = null) {
         mode,
         ready,
 
+        // Absorb the token from an already-rendered page (the one hosting
+        // the UI), saving the GET that ready() would otherwise make.
+        seed(doc) {
+            absorbToken(doc);
+        },
+
         // Initial state from an already-rendered page — no network.
         snapshotFromDocument(doc) {
             const snap = snapshot(doc, { errors: [], infos: [] });
@@ -283,4 +303,15 @@ export function createMarketAdapter(core, kind, mode, seedDoc = null) {
             return post({ ...base, price: String(order.price) }, order.resourceId);
         },
     };
+}
+
+// Shared adapter instances, one per (kind, mode).  Every module MUST get
+// its adapters through here: the single-use tokens live in the adapter, so
+// two instances for the same market in one tab would invalidate each other
+// on every POST.
+const instances = new Map();
+export function marketAdapter(core, kind, mode) {
+    const key = `${kind}|${mode}`;
+    if (!instances.has(key)) instances.set(key, createMarketAdapter(core, kind, mode));
+    return instances.get(key);
 }

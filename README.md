@@ -13,13 +13,16 @@ source instead, see [DEVELOPMENT.md](DEVELOPMENT.md).
 
 ## What changes
 
+Live updates and notifications: the stock notifications - messages, alliance, deals, incoming attacks, polls - refresh periodically without reloading the page, and support desktop notifications. Click on the the timer in the navbar to refresh immediately.
+
 Marketplace (resources, weapons, and armor modes):
 
 - Sell orders and buy orders become one page with two tabs. Switching sides,
   switching resources, buying, selling, placing and removing orders all
   happen in place, without page loads. The stock menu entries still work and
   open the side they always led to.
-- No more "Try again." on refresh; there is a proper Refresh button.
+- No more "Try again." on refresh; there is a proper Refresh button, and page
+  reload works seamlessly in the market.
 - Resource tabs show how much of each resource you own, with a toggle to
   hide DNA resources and one to show favourites only.
 - Prices are shown as what you'll actually pay or receive (your economic-type
@@ -28,13 +31,13 @@ Marketplace (resources, weapons, and armor modes):
 - When selling to buy orders, your upkeep is protected: **Sell All** is
   disabled when filling the order would cut into it, and a **Sell Max**
   button sells exactly your spare stock instead.
-- Tabs can show how much alliance mates and friends are trading in each
-  market you mark as a ★ favourite.
+- Tabs can show how much alliance mates and friends are trading in each market you mark as a ★ favourite. These also get auto-refreshed with the live update timer and can generate desktop notifications.
 - The last-viewed resource is remembered per side.
 
 Auto-login (opt-in): when the game expires your session, the script logs you
 back in and takes you to the page you were trying to open instead of the
 login screen.
+
 
 ## Notes
 
@@ -66,3 +69,10 @@ it in mind if you're security-minded or already use a password manager.
 After a "Login incorrect." response the feature disables itself (the server
 rate-limits failed logins) until you log in manually with the checkbox
 ticked again.
+
+**Live updates.** Checks every 30 seconds while some game tab is visible
+and every 2 minutes otherwise. 
+If the login session expires in the
+background, the check logs back in using the stored auto-login
+credentials, or stops (the navbar timer shows ✖) if there are none - so auto-login is useful for reliable notifications. The
+blue menu badges count alliance/friend orders across favourite markets.

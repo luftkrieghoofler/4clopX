@@ -15,9 +15,7 @@
 // credentials) until the user logs in manually with the checkbox ticked,
 // and attempts are throttled per tab.
 
-import { isLoggedInDoc, findLoginForm, login } from '../adapters/session.js';
-
-const CRED_KEY = 'credentials';
+import { isLoggedInDoc, findLoginForm, login, CRED_KEY } from '../adapters/session.js';
 const LAST_GOOD = 'clopus.nav.lastGood';
 const LAST_CLICK = 'clopus.nav.lastClick';
 const ATTEMPT_AT = 'clopus.autologin.attemptAt';
