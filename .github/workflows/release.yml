@@ -26,11 +26,13 @@ jobs:
       - name: Create GitHub release
         # Annotated tag message becomes the release notes; falls back to
         # auto-generated notes for lightweight/message-less tags. The re-fetch
-        # is needed because actions/checkout peels annotated tags.
+        # is needed because actions/checkout peels annotated tags. Notes are
+        # built from subject+body rather than %(contents) so a signed tag's
+        # PGP signature block stays out of them.
         run: |
           git fetch --force origin "refs/tags/$GITHUB_REF_NAME:refs/tags/$GITHUB_REF_NAME"
           if [ "$(git cat-file -t "$GITHUB_REF_NAME")" = "tag" ]; then
-            git tag -l --format='%(contents)' "$GITHUB_REF_NAME" > notes.md
+            git tag -l --format='%(contents:subject)%0a%0a%(contents:body)' "$GITHUB_REF_NAME" > notes.md
             gh release create "$GITHUB_REF_NAME" dist/clop.user.js --notes-file notes.md
           else
             gh release create "$GITHUB_REF_NAME" dist/clop.user.js --generate-notes

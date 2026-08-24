@@ -1,7 +1,6 @@
 {
   "name": "4clopx",
   "private": true,
-  "version": "0.3.0",
   "type": "module",
   "scripts": {
     "build": "node build.mjs",
