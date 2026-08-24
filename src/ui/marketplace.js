@@ -617,8 +617,7 @@ export const marketplaceModule = {
                     class: 'btn btn-primary btn-sm', type: 'button',
                     onclick: () => run(() => adapter().takeOrder(order, 'one')),
                 }, [bold('Sell One')]));
-                actions.appendChild(sellAllButton(order));
-                if (!mode) actions.appendChild(sellMaxButton(order));
+                actions.appendChild(sellButton(order));
                 actions.appendChild(amountForm('Sell:', 'btn-success',
                     (n) => run(() => adapter().takeOrder(order, n)),
                     (n) => `get ${core.commas(Math.floor(order.price * n * state.mult.sell))} bits`));
@@ -632,74 +631,74 @@ export const marketplaceModule = {
             ]);
         }
 
-        // Sell All / Sell Max are mutually exclusive: Sell All is for filling
-        // the whole order without touching upkeep, Sell Max for selling all
-        // spare stock (have − used) when that's less than the order.  When
-        // the spare stock exactly equals the order, both are enabled (they
-        // are equivalent).
-        function sellAllButton(order) {
+        // Combined Sell All / Sell Max button — one slot, never both.
+        // Orange "Sell All" when your spare stock (owned − reserve) covers
+        // the whole order; blue "Sell Max" selling just the spare when it
+        // doesn't — the color and the "(N: …)" amount against the visible
+        // "Amount Wanted" column signal a partial fill, and the tooltip
+        // spells it out.  Weapons/armor (no upkeep concept) and resources
+        // missing from the Overview keep plain Sell All behavior.
+        function sellButton(order) {
             const have = ownedAmount(order.resourceId);
-            const up = upkeepFor(order.resourceId);
-            const bits = Math.floor(order.price * order.amount * state.mult.sell);
-            const btn = el('button', {
-                class: 'btn btn-warning btn-sm clop-sellall', type: 'button',
+            const allBits = core.commas(Math.floor(order.price * order.amount * state.mult.sell));
+            const sellAll = () => el('button', {
+                class: 'btn btn-warning btn-sm clop-sellbtn', type: 'button',
                 onclick: () => run(() => adapter().takeOrder(order, 'all')),
-            }, [bold('Sell All'), ` (${core.commas(bits)} bits)`]);
-            if (have < order.amount) {
-                btn.disabled = true;
-                btn.title = `You only have ${core.commas(have)}`;
-            } else if (up && have - reserveOf(up) < order.amount) {
-                btn.disabled = true;
-                btn.title = `Selling all ${core.commas(order.amount)} would eat into your ` +
-                    `reserve of ${core.commas(reserveOf(up))} (${reserveText(up)}) — use Sell Max`;
-            }
-            return btn;
-        }
+            }, [bold('Sell All'), ` (${allBits} bits)`]);
 
-        function sellMaxButton(order) {
-            const have = ownedAmount(order.resourceId);
-            const up = upkeepFor(order.resourceId);
-            const btn = el('button', { class: 'btn btn-info btn-sm clop-sellmax', type: 'button' }, [bold('Sell Max')]);
-            if (!up) {
-                btn.append(' (…)');
-                btn.disabled = true;
-                btn.title = state.upkeep
-                    ? 'No upkeep data for this resource on the Overview page'
-                    : 'Fetching upkeep from the Overview page…';
+            const up = mode ? null : upkeepFor(order.resourceId);
+            if (mode || (state.upkeep && !up)) {
+                const btn = sellAll();
+                if (!mode) btn.title = 'No upkeep data for this resource on the Overview page — reserving nothing';
+                if (have < order.amount) {
+                    btn.disabled = true;
+                    btn.title = `You only have ${core.commas(have)}`;
+                }
                 return btn;
             }
+            if (!up) {
+                // Overview fetch still in flight.
+                const btn = el('button', { class: 'btn btn-warning btn-sm clop-sellbtn', type: 'button' },
+                    [bold('Sell All'), ' (…)']);
+                btn.disabled = true;
+                btn.title = 'Checking your upkeep on the Overview page…';
+                return btn;
+            }
+
             const reserve = reserveOf(up);
-            const max = Math.min(have - reserve, order.amount);
-            if (max < 1) {
+            const spare = have - reserve;
+            if (spare >= order.amount) {
+                const btn = sellAll();
+                btn.title = `Fills the whole order and leaves your reserve of ${core.commas(reserve)} ` +
+                    `(${reserveText(up)}) untouched`;
+                return btn;
+            }
+            if (spare < 1) {
+                const btn = el('button', { class: 'btn btn-info btn-sm clop-sellbtn', type: 'button' }, [bold('Sell Max')]);
                 btn.disabled = true;
                 btn.title = `Nothing to spare: you have ${core.commas(have)} and keep ` +
                     `${core.commas(reserve)} back (${reserveText(up)})`;
-            } else if (have - reserve > order.amount) {
-                btn.append(` (${core.commas(max)}: ` +
-                    `${core.commas(Math.floor(order.price * max * state.mult.sell))} bits)`);
-                btn.disabled = true;
-                btn.title = `You can spare ${core.commas(have - reserve)} — more than this whole order; use Sell All`;
-            } else {
-                btn.append(` (${core.commas(max)}: ` +
-                    `${core.commas(Math.floor(order.price * max * state.mult.sell))} bits)`);
-                btn.title = `Sell everything above your reserve of ${core.commas(reserve)} ` +
-                    `(${reserveText(up)}); re-verified before selling`;
-                btn.addEventListener('click', () => sellMax(order, { reserve, n: max }, btn));
+                return btn;
             }
+            const btn = el('button', { class: 'btn btn-info btn-sm clop-sellbtn', type: 'button' }, [
+                bold('Sell Max'),
+                ` (${core.commas(spare)}: ${core.commas(Math.floor(order.price * spare * state.mult.sell))} bits)`,
+            ]);
+            btn.title = `Fills only ${core.commas(spare)} of the ${core.commas(order.amount)} wanted — the rest of ` +
+                `your ${core.commas(have)} is your reserve (${reserveText(up)}); upkeep is re-verified before selling`;
+            btn.addEventListener('click', () => sellMax(order, { reserve, n: spare }, btn));
             return btn;
         }
 
-        // Patch the Sell All / Sell Max buttons in place once upkeep data
-        // arrives — a full render here could wipe what the user is typing.
+        // Patch the sell button in place once upkeep data arrives — a full
+        // render here could wipe what the user is typing.
         function updateSellMaxUi() {
             if (state.side !== 'buyer' || mode) return;
             for (const tr of root.querySelectorAll('tr[data-idx]')) {
                 const order = state.orders[Number(tr.getAttribute('data-idx'))];
                 if (!order || order.own) continue;
-                const oldAll = tr.querySelector('.clop-sellall');
-                if (oldAll) oldAll.replaceWith(sellAllButton(order));
-                const oldMax = tr.querySelector('.clop-sellmax');
-                if (oldMax) oldMax.replaceWith(sellMaxButton(order));
+                const old = tr.querySelector('.clop-sellbtn');
+                if (old) old.replaceWith(sellButton(order));
             }
         }
 
