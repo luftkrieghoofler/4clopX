@@ -9,6 +9,11 @@
 // core.settings.define() shows up here automatically.
 
 import { isLoggedInDoc } from '../adapters/session.js';
+import { readFavourites } from '../lib/favourites.js';
+import { marketNotifyEnabled, setMarketNotify } from './liveupdates.js';
+
+const MODE_LABELS = [['', 'Resources'], ['weapons', 'Weapons'], ['armor', 'Armor']];
+const SIDE_LABELS = [['buyer', 'buy orders'], ['sell', 'sell orders']];
 
 export const settingsModule = {
     name: 'settings',
@@ -28,6 +33,8 @@ export const settingsModule = {
             .clop-setting.checkbox { margin-top: 0; }
             .clop-setting small { display: block; margin-top: 2px; }
             .clop-setting-num { width: 90px; display: inline-block; margin-left: 8px; }
+            .clop-setting-group { font-weight: bold; margin: 12px 0 4px 0; }
+            .clop-setting-fav { margin: 0 0 2px 14px; }
         `);
 
         let overlay = null;
@@ -47,6 +54,7 @@ export const settingsModule = {
             if (overlay) return;
             const body = el('div', { class: 'panel-body' });
             for (const def of core.settings.all()) body.appendChild(settingRow(def));
+            body.appendChild(watchedMarketsSection());
             overlay = el('div', {
                 class: 'clop-settings-overlay',
                 onclick: (ev) => { if (ev.target === overlay) closePanel(); },
@@ -119,6 +127,45 @@ export const settingsModule = {
             }
             console.warn(`[4clopX] setting "${def.key}" has unknown type "${def.type}"`);
             return el('div');
+        }
+
+        // Hardcoded section: per-favourite watch flags (they're a keyed map,
+        // which doesn't fit the typed registry).  Watched markets are swept
+        // on every live update and can notify; unwatched favourites only
+        // refresh while being viewed.
+        function watchedMarketsSection() {
+            const rows = [];
+            for (const [mode, modeLabel] of MODE_LABELS) {
+                for (const [side, sideLabel] of SIDE_LABELS) {
+                    const favs = readFavourites(side, mode);
+                    if (!favs.length) continue;
+                    rows.push(el('div', { class: 'clop-setting-group' }, [`${modeLabel} — ${sideLabel}`]));
+                    for (const fav of favs) {
+                        const cb = el('input', {
+                            type: 'checkbox',
+                            onchange: (ev) => {
+                                setMarketNotify(mode, side, fav.id, ev.target.checked);
+                                core.events.emit('market:friendlyCache', {});
+                            },
+                        });
+                        cb.checked = marketNotifyEnabled(mode, side, fav.id);
+                        rows.push(el('div', { class: 'checkbox clop-setting clop-setting-fav' }, [
+                            el('label', {}, [cb, ` ${fav.name || `resource ${fav.id}`}`]),
+                        ]));
+                    }
+                }
+            }
+            return el('div', {}, [
+                el('hr'),
+                el('div', { class: 'clop-setting-group' }, ['Watched favourite markets']),
+                el('small', { class: 'text-muted' }, [
+                    'Watched markets are checked for alliance/friend orders on every live update, count toward the ' +
+                    'blue badges and the tab title, and can raise notifications. Other markets refresh only when ' +
+                    'you open their tab.',
+                ]),
+                ...(rows.length ? rows
+                    : [el('div', { class: 'text-muted clop-setting-fav' }, ['No favourite markets yet — open a market and hit ☆ Favourite.'])]),
+            ]);
         }
 
         const navRight = document.querySelector('nav.navbar ul.navbar-right');

@@ -13,8 +13,10 @@ import {
     marketIsEmpty, hideStockMarketUi, stockUiInsertionPoint, summarizeFriendly,
 } from '../adapters/market.js';
 import { fetchResourceStats } from '../adapters/overview.js';
-import { readFriendlyCache, friendlyTotals, writeFriendlyCacheEntry } from './liveupdates.js';
-import { readFavourites, writeFavourites } from '../lib/favourites.js';
+import {
+    readFriendlyCache, friendlyTotals, writeFriendlyCacheEntry, marketNotifyEnabled,
+} from './liveupdates.js';
+import { favouriteIds, writeFavourites } from '../lib/favourites.js';
 
 const SIDES = [
     { side: 'sell', label: 'Sell Orders', hint: 'Listings from sellers — buy from them here.' },
@@ -80,13 +82,15 @@ export const marketplaceModule = {
             showHelp: false,
         };
 
-        // Favourites are kept separately per side (and per mode).
+        // Favourites are kept separately per side (and per mode); names are
+        // stored alongside ids so other pages can label them.
         state.favs = {
-            sell: new Set(readFavourites('sell', mode)),
-            buyer: new Set(readFavourites('buyer', mode)),
+            sell: new Set(favouriteIds('sell', mode)),
+            buyer: new Set(favouriteIds('buyer', mode)),
         };
         const favs = () => state.favs[state.side];
-        const saveFavs = () => writeFavourites(state.side, mode, favs());
+        const saveFavs = () => writeFavourites(state.side, mode,
+            [...favs()].map((id) => ({ id, name: resourceName(id) })));
 
         // Warm the alliance-order store from the shared live-update cache,
         // so favourite badges show instantly without a sweep.
@@ -135,7 +139,9 @@ export const marketplaceModule = {
             updateSideTabBadges();
         });
         core.events.on('market:friendlyCache', () => {
-            if (!state.busy) updateSideTabBadges();
+            if (state.busy) return;
+            updateBadges();          // watch flags may have changed too
+            updateSideTabBadges();
         });
 
         /* ---------------- adapter plumbing ---------------- */
@@ -143,13 +149,13 @@ export const marketplaceModule = {
         const adapter = () => adapters[state.side];
 
         // Track a market's friendly orders from a fresh response — locally,
-        // and (for favourites) in the shared live-update cache, so filling
-        // an alliance order updates the blue badges, tab title, and other
-        // tabs immediately instead of at the next sweep.
+        // and (for watched markets) in the shared live-update cache, so
+        // filling an alliance order updates the blue badges, tab title, and
+        // other tabs immediately instead of at the next sweep.
         function recordFriendly(side, resourceId, orders) {
             const summary = summarizeFriendly(orders);
             state.friendly[side][resourceId] = summary;
-            if (state.favs[side].has(resourceId)
+            if (marketNotifyEnabled(mode, side, resourceId)
                 && writeFriendlyCacheEntry(mode, side, resourceId, summary, resourceName(resourceId))) {
                 core.events.emit('market:friendlyCache', {});
             }
@@ -191,7 +197,7 @@ export const marketplaceModule = {
         // load is wanted; everywhere else the engine's own schedule rules.
         const loadAndPoll = (resourceId) => {
             (resourceId ? load(resourceId) : Promise.resolve())
-                .then(() => core.events.emit('live:pollNow', { visit: { mode, side: state.side } }));
+                .then(() => core.events.emit('live:pollNow', {}));
         };
 
         /* ---------------- upkeep (Sell Max) ----------------
@@ -314,6 +320,7 @@ export const marketplaceModule = {
             #clop-market-root .clop-filter-toggle input { margin-right: 4px; }
             #clop-market-root .clop-help { cursor: pointer; margin-top: 12px; }
             #clop-market-root .clop-friendly-badge { margin-left: 6px; }
+            #clop-market-root .clop-watch-mark { margin-left: 5px; opacity: .65; font-size: 85%; }
             #clop-market-root .clop-form-row { display: flex; align-items: flex-start; gap: 10px; }
             #clop-market-root .clop-form-row .clop-place { flex: 1; }
             #clop-market-root .clop-form-row > button { margin-top: 8px; white-space: nowrap; }
@@ -390,6 +397,8 @@ export const marketplaceModule = {
             for (const r of visible) {
                 const label = r.have ? `${r.name} (${core.commas(r.have)})` : r.name;
                 const a = el('a', { onclick: () => load(r.id) }, [label]);
+                const mark = watchMarkFor(r.id);
+                if (mark) a.appendChild(mark);
                 const badge = badgeFor(r.id);
                 if (badge) a.appendChild(badge);
                 tabs.appendChild(el('li', {
@@ -449,10 +458,10 @@ export const marketplaceModule = {
                 help.appendChild(el('span', {}, [
                     'Tab badges count the open orders of your alliance mates and friends (the green/blue names) ' +
                     'on this side of the market: 2(68) means two of them are trading 68 units in total. ' +
-                    'Only ★ favourite markets and the currently open one are counted. Each favourite costs one ' +
-                    'extra server request on every load and view change, so try not to spam the server. ' +
-                    'Buy orders refresh with the live-update timer and can raise notifications; ' +
-                    'sell-order counts only refresh while you are visiting the sell side.',
+                    'Badges appear on 👁 watched markets only — pick those in the ⚙ settings from your ★ ' +
+                    'favourites (buy orders are watched by default). Watched markets refresh with every live ' +
+                    'update, each costing one request per check, so watch sparingly. Everything else refreshes ' +
+                    'only when you open its tab.',
                 ]));
                 root.appendChild(help);
             }
@@ -466,10 +475,20 @@ export const marketplaceModule = {
             root.appendChild(renderOrders());
         }
 
-        // [orders(total)] alliance/friend badge for a tab — favourites and
-        // the open market only.
+        // Watched markets carry a persistent indicator — a badge alone can't
+        // signal watching, since zero-order badges are hidden.
+        function watchMarkFor(id) {
+            if (!marketNotifyEnabled(mode, state.side, id)) return null;
+            return el('span', {
+                class: 'clop-watch-mark',
+                title: 'Watched: refreshes with every live update and can notify (change in ⚙ settings)',
+            }, ['👁']);
+        }
+
+        // [orders (total)] alliance/friend badge for a tab — watched markets
+        // only, so every badge shown contributes to the header/menu totals.
         function badgeFor(id) {
-            if (id !== state.activeId && !favs().has(id)) return null;
+            if (!marketNotifyEnabled(mode, state.side, id)) return null;
             const f = state.friendly[state.side][id];
             if (!f || !f.count) return null;
             const what = state.side === 'sell' ? 'selling' : 'buying';
@@ -479,11 +498,10 @@ export const marketplaceModule = {
             }, [`${f.count} (${core.commas(f.amount)})`]);
         }
 
-        // Alliance-order total across cached favourites for one side tab —
-        // buy orders only (the actionable side); sell listings carry no
-        // total badge.
+        // Alliance-order total across this side's watched favourites (with
+        // the defaults, that's buy orders only — sell markets show up here
+        // once watched via the settings panel).
         function sideTabBadge(side) {
-            if (side !== 'buyer') return null;
             const t = friendlyTotals(mode, side);
             if (!t.orders) return null;
             return el('span', {
@@ -503,14 +521,17 @@ export const marketplaceModule = {
             }
         }
 
-        // Patch badges into the existing tabs without a full render — a
-        // render mid-sweep would wipe whatever the user is typing.
+        // Patch badges and watch marks into the existing tabs without a
+        // full render — a render mid-sweep would wipe whatever the user is
+        // typing.
         function updateBadges() {
             for (const li of root.querySelectorAll('.clop-tabs li[data-rid]')) {
+                const id = li.getAttribute('data-rid');
                 const a = li.querySelector('a');
-                const old = a.querySelector('.clop-friendly-badge');
-                if (old) old.remove();
-                const badge = badgeFor(li.getAttribute('data-rid'));
+                for (const old of a.querySelectorAll('.clop-watch-mark, .clop-friendly-badge')) old.remove();
+                const mark = watchMarkFor(id);
+                if (mark) a.appendChild(mark);
+                const badge = badgeFor(id);
                 if (badge) a.appendChild(badge);
             }
         }
@@ -761,6 +782,6 @@ export const marketplaceModule = {
         // nothing rendered yet — load it dynamically, then run a full poll.
         if (state.side === 'buyer') maybeFetchUpkeep();
         if (state.activeId && !state.updatedAt) loadAndPoll(state.activeId);
-        else core.events.emit('live:pollNow', { visit: { mode, side: state.side } });
+        else core.events.emit('live:pollNow', {});
     },
 };
