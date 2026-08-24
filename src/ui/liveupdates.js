@@ -437,6 +437,17 @@ export const liveUpdatesModule = {
         // per-market watching: core.marketNotify.enabled/set(mode, side, id).
         core.marketNotify = { enabled: marketNotifyEnabled, set: setMarketNotify };
 
+        // Every page load carries authoritative header counts for free —
+        // publish them so other tabs pick up cleared notifications (reading
+        // messages, viewing the alliance page) immediately instead of at
+        // the next poll.  Skipped when a poll finished after this page
+        // started loading, since that data is fresher than our render.
+        const loadedAt = (typeof performance !== 'undefined' && performance.timeOrigin) || Date.now();
+        const storedBadges = jget(K.badges, null);
+        if (!storedBadges || storedBadges.at < loadedAt) {
+            jset(K.badges, { at: loadedAt, values: headerBadges(document) });
+        }
+
         window.addEventListener('storage', (ev) => {
             if (stopped || !ev.key) return;
             if (ev.key === K.badges) {
