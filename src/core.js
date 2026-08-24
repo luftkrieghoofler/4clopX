@@ -7,14 +7,25 @@ export const core = {
     version: __CLOPX_VERSION__,
     modules: [],
 
-    // A module is { name, matches(page, location), init(core) } where `page`
-    // is the basename of location.pathname.
+    // A module is { name, matches(page, location), settings?(core),
+    // init(core) } where `page` is the basename of location.pathname.
+    // settings() registers the module's core.settings definitions and runs
+    // on EVERY page regardless of matches() — the settings panel is global,
+    // so definitions must always exist; init() is the page-scoped UI.
     register(mod) {
         this.modules.push(mod);
     },
 
     boot() {
         const page = location.pathname.replace(/^.*\//, '');
+        for (const mod of this.modules) {
+            if (!mod.settings) continue;
+            try {
+                mod.settings(this);
+            } catch (e) {
+                console.error(`[4clopX] module "${mod.name}" settings registration failed:`, e);
+            }
+        }
         for (const mod of this.modules) {
             let use = false;
             try { use = mod.matches(page, location); } catch (e) { /* ignore */ }
@@ -99,6 +110,8 @@ export const core = {
 
         // def: {
         //   key, label, description,
+        //   section,               // settings-panel grouping (e.g. 'Market');
+        //                          //   sections appear in first-seen order
         //   type: 'bool' | 'number' | 'button',
         //   default,               // bool/number
         //   handler,               // button: invoked by the settings UI

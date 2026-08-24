@@ -49,4 +49,4 @@ The script exports a debug handle to the page window: `clopX` (e.g. `clopX.setti
 
 ## Adding a module
 
-A module is `{ name, matches(page, location), init(core) }`. Create it in `src/ui/`, register it in `src/main.js`, rebuild. If it needs new server interactions, keep the protocol and parsing in a `src/adapters/` file.
+A module is `{ name, matches(page, location), settings?(core), init(core) }`. `settings()` registers the module's `core.settings.define()` entries and runs on every page regardless of `matches()` (the settings panel is global); `init()` is the page-scoped UI. Create the module in `src/ui/`, register it in `src/main.js`, rebuild. If it needs new server interactions, keep the protocol and parsing in a `src/adapters/` file.

@@ -31,6 +31,17 @@ export const marketplaceModule = {
         return page === 'marketplace.php' || page === 'buyermarketplace.php';
     },
 
+    settings(core) {
+        core.settings.define({
+            key: 'market.sellMaxNegativeNetConfirm',
+            label: 'Confirm "Sell Max" when net production is negative',
+            description: 'Ask for confirmation before Sell Max empties a stockpile whose per-tick net production is negative (i.e. one you are draining every tick).',
+            type: 'bool',
+            default: true,
+            section: 'Market',
+        });
+    },
+
     init(core) {
         if (!parseToken(document)) {
             console.warn('[4clopX] marketplace: no token on page (not logged in?), leaving page alone');
@@ -40,14 +51,6 @@ export const marketplaceModule = {
         const el = core.el.bind(core);
         const mode = parseMode(document);              // '' | 'weapons' | 'armor'
         const hostKind = kindFromLocation(location);
-
-        core.settings.define({
-            key: 'market.sellMaxNegativeNetConfirm',
-            label: 'Confirm "Sell Max" when net production is negative',
-            description: 'Ask for confirmation before Sell Max empties a stockpile whose per-tick net production is negative (i.e. one you are draining every tick).',
-            type: 'bool',
-            default: true,
-        });
 
         // Shared instances (the liveupdates module sweeps through the same
         // ones, so the single-use tokens stay coherent within this tab).

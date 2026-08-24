@@ -180,9 +180,10 @@ export const liveUpdatesModule = {
 
     matches: () => true,
 
-    init(core) {
+    settings(core) {
         core.settings.define({
             key: 'live.enabled',
+            section: 'Live updates',
             label: 'Live updates (messages, alliance, favourite markets)',
             description: 'Periodically check for new messages, alliance messages, and alliance orders in favourite markets, updating the header badges in place.',
             type: 'bool',
@@ -191,6 +192,7 @@ export const liveUpdatesModule = {
         });
         core.settings.define({
             key: 'live.intervalFocused',
+            section: 'Live updates',
             label: 'Live update interval while a tab is visible (seconds)',
             description: 'How often to check while some game tab is being looked at.',
             type: 'number',
@@ -198,6 +200,7 @@ export const liveUpdatesModule = {
         });
         core.settings.define({
             key: 'live.intervalBlurred',
+            section: 'Live updates',
             label: 'Live update interval in the background (seconds)',
             description: 'How often to check while no game tab is visible.',
             type: 'number',
@@ -205,6 +208,7 @@ export const liveUpdatesModule = {
         });
         core.settings.define({
             key: 'live.notify',
+            section: 'Live updates',
             label: 'Desktop notifications while no tab is focused',
             description: 'Notify about new messages, alliance messages, deals, incoming attacks, and alliance orders in favourite markets.',
             type: 'bool',
@@ -219,6 +223,7 @@ export const liveUpdatesModule = {
         });
         core.settings.define({
             key: 'live.titleMarket',
+            section: 'Market',
             label: 'Market overview in the tab title',
             description: 'Show the watched-market buy-order total as "(Mkt: N)" in the browser tab title. The [N] notifications marker is unaffected.',
             type: 'bool',
@@ -226,7 +231,18 @@ export const liveUpdatesModule = {
             // Nudge the title to re-render right away.
             onChange: () => core.events.emit('market:friendlyCache', {}),
         });
+        core.settings.define({
+            key: 'market.blueBadges',
+            label: 'Blue market-order badges',
+            description: 'Show the alliance-order badges in blue, distinct from the stock notification badges; turn off to match the stock style.',
+            type: 'bool',
+            default: true,
+            section: 'Market',
+            onChange: (on) => document.body.classList.toggle('clop-blue-badges', on),
+        });
+    },
 
+    init(core) {
         if (!isLoggedInDoc(document)) return;
 
         const el = core.el.bind(core);
@@ -252,8 +268,10 @@ export const liveUpdatesModule = {
         };
 
         core.addStyle(`
-            .clop-menu-badge { margin-left: 5px; background-color: #5bc0de; color: #fff; }
+            .clop-menu-badge { margin-left: 5px; }
+            body.clop-blue-badges .clop-menu-badge { background-color: #5bc0de; color: #fff; }
         `);
+        document.body.classList.toggle('clop-blue-badges', core.settings.get('market.blueBadges'));
 
         /* ---------------- alliance-order menu badges ---------------- */
 

@@ -41,26 +41,30 @@ export const autologinModule = {
 
     matches: () => true,
 
-    init(core) {
+    settings(core) {
         core.settings.define({
             key: 'autologin.enabled',
             label: 'Automatically log back in when the session expires',
             description: 'Uses the credentials remembered via the login form checkbox (stored in the userscript manager, unreadable to page scripts).',
             type: 'bool',
             default: true,
+            section: 'Auto-login',
         });
-
-        core.autologin = {
-            forget: () => core.secrets.remove(CRED_KEY)
-                .then(() => console.info('[4clopX] stored credentials removed')),
-        };
         core.settings.define({
             key: 'autologin.forget',
             label: 'Forget stored credentials',
             description: 'Erase the username and password saved for auto-login from the userscript manager\'s storage.',
             type: 'button',
+            section: 'Auto-login',
             handler: () => core.autologin.forget(),
         });
+    },
+
+    init(core) {
+        core.autologin = {
+            forget: () => core.secrets.remove(CRED_KEY)
+                .then(() => console.info('[4clopX] stored credentials removed')),
+        };
 
         // Record every same-origin link click BEFORE navigation: if the next
         // page bounces to the login screen, this is where the user wanted

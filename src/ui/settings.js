@@ -33,6 +33,9 @@ export const settingsModule = {
             .clop-setting small { display: block; margin-top: 2px; }
             .clop-setting-num { width: 90px; display: inline-block; margin-left: 8px; }
             .clop-setting-group { font-weight: bold; margin: 12px 0 4px 0; }
+            .clop-section-heading { font-weight: bold; font-size: 15px; border-bottom: 1px solid rgba(128,128,128,.4); padding-bottom: 4px; margin: 20px 0 10px 0; }
+            .clop-settings-panel .panel-body > .clop-section-heading:first-child { margin-top: 0; }
+            .clop-setting label { font-weight: normal; }
             .clop-setting-fav { margin: 0 0 2px 14px; }
             .clop-watch-table { margin-bottom: 8px; }
             .clop-watch-table th, .clop-watch-table td { padding: 3px 8px; }
@@ -56,7 +59,18 @@ export const settingsModule = {
         function openPanel() {
             if (overlay) return;
             const body = el('div', { class: 'panel-body' });
-            for (const def of core.settings.all()) body.appendChild(settingRow(def));
+            // Group by each definition's `section`, in first-seen order
+            // (module registration order: Auto-login, Live updates, Market).
+            const sections = new Map();
+            for (const def of core.settings.all()) {
+                const label = def.section || 'General';
+                if (!sections.has(label)) sections.set(label, []);
+                sections.get(label).push(def);
+            }
+            for (const [label, defs] of sections) {
+                body.appendChild(el('div', { class: 'clop-section-heading' }, [label]));
+                for (const def of defs) body.appendChild(settingRow(def));
+            }
             body.appendChild(watchedMarketsSection());
             overlay = el('div', {
                 class: 'clop-settings-overlay',
@@ -188,8 +202,7 @@ export const settingsModule = {
                 ]));
             }
             return el('div', {}, [
-                el('hr'),
-                el('div', { class: 'clop-setting-group' }, ['Watched favourite markets']),
+                el('div', { class: 'clop-section-heading' }, ['Watched favourite markets']),
                 el('small', { class: 'text-muted' }, [
                     'Watched markets are checked for alliance/friend orders on every live update, count toward the ' +
                     'blue badges and the tab title, and can raise notifications. Other markets refresh only when ' +
