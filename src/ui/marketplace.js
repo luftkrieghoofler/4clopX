@@ -15,7 +15,7 @@ import {
 import { fetchResourceStats } from '../adapters/overview.js';
 import {
     readFriendlyCache, friendlyTotals, writeFriendlyCacheEntry,
-    marketNotifyEnabled, setMarketNotify, forgetMarket,
+    marketNotifyEnabled, forgetMarket,
 } from './liveupdates.js';
 import { favouriteIds, writeFavourites, writeResourceOrder } from '../lib/favourites.js';
 
@@ -146,7 +146,9 @@ export const marketplaceModule = {
             if (state.busy) return;
             updateBadges();          // watch flags may have changed too
             updateSideTabBadges();
+            updateWatchButton();
         });
+
 
         /* ---------------- adapter plumbing ---------------- */
 
@@ -579,19 +581,28 @@ export const marketplaceModule = {
             if (!favs().has(state.activeId)) return null;
             const watched = marketNotifyEnabled(mode, state.side, state.activeId);
             return el('button', {
-                class: `btn btn-sm ${watched ? 'btn-info' : 'btn-default'} clop-action`,
+                class: `btn btn-sm ${watched ? 'btn-info' : 'btn-default'} clop-action clop-watch-btn`,
                 type: 'button',
                 title: watched
                     ? 'Stop auto-refreshing this market with live updates'
                     : 'Auto-refresh this market with live updates, count it in the blue badges, and notify on new alliance orders',
                 onclick: () => {
-                    const on = !watched;
-                    setMarketNotify(mode, state.side, state.activeId, on);
-                    if (on) recordFriendly(state.side, state.activeId, state.orders);
-                    core.events.emit('market:friendlyCache', {});
+                    core.marketNotify.set(mode, state.side, state.activeId, !watched);
                     render();
                 },
             }, [watched ? '👁 Unwatch' : '👁 Watch']);
+        }
+
+        // Patch the inline watch button when flags change without a full
+        // render (e.g. toggled from the settings panel, possibly in another
+        // tab).  The appear-from-nothing case only follows favouriting,
+        // which renders anyway.
+        function updateWatchButton() {
+            const old = root.querySelector('.clop-watch-btn');
+            if (!old) return;
+            const fresh = watchButton();
+            if (fresh) old.replaceWith(fresh);
+            else old.remove();
         }
 
         /* list / offer form for the active resource */

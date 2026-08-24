@@ -10,10 +10,9 @@
 
 import { isLoggedInDoc } from '../adapters/session.js';
 import { readFavourites, sortByResourceOrder } from '../lib/favourites.js';
-import { marketNotifyEnabled, setMarketNotify } from './liveupdates.js';
+import { marketNotifyEnabled } from './liveupdates.js';
 
 const MODE_LABELS = [['', 'Resources'], ['weapons', 'Weapons'], ['armor', 'Armor']];
-const SIDE_LABELS = [['buyer', 'buy orders'], ['sell', 'sell orders']];
 
 export const settingsModule = {
     name: 'settings',
@@ -35,6 +34,10 @@ export const settingsModule = {
             .clop-setting-num { width: 90px; display: inline-block; margin-left: 8px; }
             .clop-setting-group { font-weight: bold; margin: 12px 0 4px 0; }
             .clop-setting-fav { margin: 0 0 2px 14px; }
+            .clop-watch-table { margin-bottom: 8px; }
+            .clop-watch-table th, .clop-watch-table td { padding: 3px 8px; }
+            .clop-watch-table th:nth-child(n+2), .clop-watch-table td:nth-child(n+2) { width: 56px; text-align: center; }
+            .clop-watch-table input[type="checkbox"] { margin: 0; }
         `);
 
         let overlay = null;
@@ -130,30 +133,59 @@ export const settingsModule = {
         }
 
         // Hardcoded section: per-favourite watch flags (they're a keyed map,
-        // which doesn't fit the typed registry).  Watched markets are swept
-        // on every live update and can notify; unwatched favourites only
-        // refresh while being viewed.
+        // which doesn't fit the typed registry).  One table per mode, one
+        // row per favourite market (in server resource order), with a
+        // Sell and a Buy checkbox column; sides where the market isn't a
+        // favourite show a dash, since only favourites can be watched.
+        function watchCell(mode, side, id, isFav) {
+            if (!isFav) {
+                return el('td', { class: 'text-muted', title: 'Not a ★ favourite on this side' }, ['—']);
+            }
+            const cb = el('input', {
+                type: 'checkbox',
+                onchange: (ev) => core.marketNotify.set(mode, side, id, ev.target.checked),
+            });
+            cb.checked = marketNotifyEnabled(mode, side, id);
+            return el('td', {}, [cb]);
+        }
+
         function watchedMarketsSection() {
-            const rows = [];
+            const blocks = [];
             for (const [mode, modeLabel] of MODE_LABELS) {
-                for (const [side, sideLabel] of SIDE_LABELS) {
-                    const favs = sortByResourceOrder(mode, readFavourites(side, mode));
-                    if (!favs.length) continue;
-                    rows.push(el('div', { class: 'clop-setting-group' }, [`${modeLabel} — ${sideLabel}`]));
-                    for (const fav of favs) {
-                        const cb = el('input', {
-                            type: 'checkbox',
-                            onchange: (ev) => {
-                                setMarketNotify(mode, side, fav.id, ev.target.checked);
-                                core.events.emit('market:friendlyCache', {});
-                            },
-                        });
-                        cb.checked = marketNotifyEnabled(mode, side, fav.id);
-                        rows.push(el('div', { class: 'checkbox clop-setting clop-setting-fav' }, [
-                            el('label', {}, [cb, ` ${fav.name || `resource ${fav.id}`}`]),
-                        ]));
+                const bySide = {
+                    sell: readFavourites('sell', mode),
+                    buyer: readFavourites('buyer', mode),
+                };
+                const byId = new Map();
+                for (const side of ['sell', 'buyer']) {
+                    for (const f of bySide[side]) {
+                        const known = byId.get(f.id);
+                        if (!known) byId.set(f.id, { id: f.id, name: f.name });
+                        else if (!known.name && f.name) known.name = f.name;
                     }
                 }
+                if (!byId.size) continue;
+                const favSets = {
+                    sell: new Set(bySide.sell.map((f) => f.id)),
+                    buyer: new Set(bySide.buyer.map((f) => f.id)),
+                };
+                const tbody = el('tbody');
+                for (const market of sortByResourceOrder(mode, [...byId.values()])) {
+                    tbody.appendChild(el('tr', {}, [
+                        el('td', {}, [market.name || `resource ${market.id}`]),
+                        watchCell(mode, 'sell', market.id, favSets.sell.has(market.id)),
+                        watchCell(mode, 'buyer', market.id, favSets.buyer.has(market.id)),
+                    ]));
+                }
+                blocks.push(el('div', { class: 'clop-setting-group' }, [modeLabel]));
+                blocks.push(el('table', { class: 'table table-condensed clop-watch-table' }, [
+                    el('thead', {}, [el('tr', {}, [
+                        el('th', {}, ['Market']),
+                        el('th', {}, ['Sell']),
+                        el('th', {}, ['Buy']),
+                    ])]),
+                    tbody,
+                ]));
             }
             return el('div', {}, [
                 el('hr'),
@@ -163,7 +195,7 @@ export const settingsModule = {
                     'blue badges and the tab title, and can raise notifications. Other markets refresh only when ' +
                     'you open their tab.',
                 ]),
-                ...(rows.length ? rows
+                ...(blocks.length ? blocks
                     : [el('div', { class: 'text-muted clop-setting-fav' }, ['No favourite markets yet — open a market and hit ☆ Favourite.'])]),
             ]);
         }

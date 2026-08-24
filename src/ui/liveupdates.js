@@ -540,9 +540,36 @@ export const liveUpdatesModule = {
         core.events.on('market:friendlyCache', updateMenuBadges);
         core.events.on('live:pollNow', requestPollNow);
 
-        // Handle for the future settings UI (and the console) to toggle
-        // per-market watching: core.marketNotify.enabled/set(mode, side, id).
-        core.marketNotify = { enabled: marketNotifyEnabled, set: setMarketNotify };
+        // THE watch-toggle API — the settings panel, the inline market
+        // button, and the console all go through here, so every toggle
+        // behaves identically no matter which page or tab it happens on:
+        //   * the flag is written (and the cache purged on unwatch),
+        //   * flag-dependent UI (eye marks, buttons, dashes) refreshes at
+        //     once, here and — via the storage events — in other tabs,
+        //   * on watch-enable, the market is fetched once (through the
+        //     normal serialized queue) to seed the cache, which updates
+        //     every badge total everywhere as soon as it lands.
+        async function seedWatchedMarket(mode, side, resourceId) {
+            try {
+                const snap = await marketAdapter(core, side, mode).load(resourceId);
+                if (!marketNotifyEnabled(mode, side, resourceId)) return;   // toggled off meanwhile
+                const summary = summarizeFriendly(snap.orders);
+                const res = snap.resources.find((r) => r.id === resourceId);
+                if (writeFriendlyCacheEntry(mode, side, resourceId, summary, res && res.name)) {
+                    core.events.emit('market:friendlyCache', {});
+                }
+            } catch (e) {
+                console.warn('[4clopX] failed to load newly watched market:', e);
+            }
+        }
+        core.marketNotify = {
+            enabled: marketNotifyEnabled,
+            set(mode, side, resourceId, on) {
+                setMarketNotify(mode, side, resourceId, on);
+                core.events.emit('market:friendlyCache', {});
+                if (on) seedWatchedMarket(mode, side, resourceId);
+            },
+        };
 
         // Every page load carries authoritative header counts for free —
         // publish them so other tabs pick up cleared notifications (reading
@@ -581,7 +608,9 @@ export const liveUpdatesModule = {
                 }
                 core.events.emit('market:friendlyCache', {});
             } else if (ev.key === NOTIFY_KEY) {
-                // Watch flags changed in another tab: recompute badge totals.
+                // Watch flags changed in another tab: refresh flag-dependent
+                // UI.  The toggling tab does any seeding fetch itself; its
+                // cache write arrives via the K.friendly event above.
                 core.events.emit('market:friendlyCache', {});
             } else if (ev.key === K.seen) {
                 clampSchedule();
