@@ -97,7 +97,16 @@ export const core = {
     settings: {
         _defs: new Map(),
 
-        // def: { key, label, description, type: 'bool', default }
+        // def: {
+        //   key, label, description,
+        //   type: 'bool' | 'number' | 'button',
+        //   default,               // bool/number
+        //   handler,               // button: invoked by the settings UI
+        //   onChange,              // optional: called by the settings UI
+        //                          //   with the new value after set()
+        //   reload: true,          // optional: only takes effect after a
+        //                          //   page reload (shown in the UI)
+        // }
         define(def) {
             this._defs.set(def.key, def);
         },

@@ -142,6 +142,7 @@ export const liveUpdatesModule = {
             description: 'Periodically check for new messages, alliance messages, and alliance orders in favourite markets, updating the header badges in place.',
             type: 'bool',
             default: true,
+            reload: true,
         });
         core.settings.define({
             key: 'live.intervalFocused',
@@ -163,6 +164,13 @@ export const liveUpdatesModule = {
             description: 'Notify about new messages, alliance messages, deals, incoming attacks, and alliance orders in favourite markets.',
             type: 'bool',
             default: true,
+            // The settings-UI click is a user gesture, which is exactly
+            // when browsers allow the permission prompt.
+            onChange: (on) => {
+                if (on && typeof Notification !== 'undefined' && Notification.permission === 'default') {
+                    Notification.requestPermission();
+                }
+            },
         });
         core.settings.define({
             key: 'live.titleMarket',
@@ -170,6 +178,8 @@ export const liveUpdatesModule = {
             description: 'Show the watched-market buy-order total as "(Mkt: N)" in the browser tab title. The [N] notifications marker is unaffected.',
             type: 'bool',
             default: true,
+            // Nudge the title to re-render right away.
+            onChange: () => core.events.emit('market:friendlyCache', {}),
         });
 
         if (!isLoggedInDoc(document)) return;

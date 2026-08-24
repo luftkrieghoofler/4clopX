@@ -54,6 +54,13 @@ export const autologinModule = {
             forget: () => core.secrets.remove(CRED_KEY)
                 .then(() => console.info('[4clopX] stored credentials removed')),
         };
+        core.settings.define({
+            key: 'autologin.forget',
+            label: 'Forget stored credentials',
+            description: 'Erase the username and password saved for auto-login from the userscript manager\'s storage.',
+            type: 'button',
+            handler: () => core.autologin.forget(),
+        });
 
         // Record every same-origin link click BEFORE navigation: if the next
         // page bounces to the login screen, this is where the user wanted
