@@ -13,7 +13,7 @@ import {
     marketIsEmpty, hideStockMarketUi, stockUiInsertionPoint, summarizeFriendly,
 } from '../adapters/market.js';
 import { fetchResourceStats } from '../adapters/overview.js';
-import { readFriendlyCache, friendlyTotals } from './liveupdates.js';
+import { readFriendlyCache, friendlyTotals, writeFriendlyCacheEntry } from './liveupdates.js';
 import { readFavourites, writeFavourites } from '../lib/favourites.js';
 
 const SIDES = [
@@ -102,7 +102,7 @@ export const marketplaceModule = {
         state.orders = boot.orders;
         if (boot.resourceId) {
             state.activeId = boot.resourceId;
-            state.friendly[hostKind][boot.resourceId] = summarizeFriendly(boot.orders);
+            recordFriendly(hostKind, boot.resourceId, boot.orders);
             if (boot.orders.length || marketIsEmpty(document)) state.updatedAt = new Date();
         } else {
             const remembered = core.storage.get(lastKey(hostKind));
@@ -142,6 +142,19 @@ export const marketplaceModule = {
 
         const adapter = () => adapters[state.side];
 
+        // Track a market's friendly orders from a fresh response — locally,
+        // and (for favourites) in the shared live-update cache, so filling
+        // an alliance order updates the blue badges, tab title, and other
+        // tabs immediately instead of at the next sweep.
+        function recordFriendly(side, resourceId, orders) {
+            const summary = summarizeFriendly(orders);
+            state.friendly[side][resourceId] = summary;
+            if (state.favs[side].has(resourceId)
+                && writeFriendlyCacheEntry(mode, side, resourceId, summary, resourceName(resourceId))) {
+                core.events.emit('market:friendlyCache', {});
+            }
+        }
+
         function merge(snap) {
             state.orders = snap.orders;
             if (snap.funds) state.funds = snap.funds;
@@ -150,7 +163,7 @@ export const marketplaceModule = {
             state.messages = snap.messages;
             if (snap.resourceId) {
                 state.activeId = snap.resourceId;
-                state.friendly[snap.kind][snap.resourceId] = summarizeFriendly(snap.orders);
+                recordFriendly(snap.kind, snap.resourceId, snap.orders);
                 core.storage.set(lastKey(snap.kind), snap.resourceId);
             }
             state.updatedAt = new Date();

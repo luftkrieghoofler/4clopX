@@ -79,6 +79,28 @@ export function readFriendlyCache() {
     return jget(K.friendly, {}) || {};
 }
 
+// Patch one market's entry in the shared cache in place — used by the
+// marketplace UI, whose every action response carries fresh orders for the
+// open market, so badges and titles update without waiting for a sweep.
+// Returns true if anything changed.  Callers must only write favourite
+// markets (the cache is favourites-only by definition) and emit
+// 'market:friendlyCache' when this returns true; the localStorage write
+// updates other tabs by itself.
+export function writeFriendlyCacheEntry(mode, side, resourceId, summary, name) {
+    const cache = readFriendlyCache();
+    const key = `${mode || 'resources'}|${side}|${resourceId}`;
+    const prev = cache[key];
+    if (prev && prev.count === summary.count && prev.amount === summary.amount) return false;
+    cache[key] = {
+        count: summary.count,
+        amount: summary.amount,
+        name: name || (prev ? prev.name : `resource ${resourceId}`),
+        at: Date.now(),
+    };
+    jset(K.friendly, cache);
+    return true;
+}
+
 // Totals across the cached favourite markets of one mode+side.
 export function friendlyTotals(mode, side) {
     const prefix = `${mode || 'resources'}|${side}|`;
@@ -339,7 +361,6 @@ export const liveUpdatesModule = {
             }
             jset(K.friendly, next);
             core.events.emit('market:friendlyCache', {});
-            updateMenuBadges();
         }
 
         /* ---------------- leader election ---------------- */
@@ -475,7 +496,11 @@ export const liveUpdatesModule = {
         /* ---------------- wiring ---------------- */
 
         // Cache-driven UI works on every page, even with live updates off.
+        // Every friendly-cache change — sweeps, cross-tab storage events,
+        // and in-place patches from marketplace actions — refreshes the
+        // menu badges and tab title through this one event.
         updateMenuBadges();
+        core.events.on('market:friendlyCache', updateMenuBadges);
         core.events.on('live:pollNow', requestPollNow);
 
         // Handle for the future settings UI (and the console) to toggle
@@ -518,7 +543,6 @@ export const liveUpdatesModule = {
                     }
                 }
                 core.events.emit('market:friendlyCache', {});
-                updateMenuBadges();
             } else if (ev.key === K.seen) {
                 clampSchedule();
             } else if (ev.key === K.pollNow) {
