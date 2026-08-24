@@ -35,6 +35,7 @@
 import { marketAdapter, marketPageUrl, summarizeFriendly } from '../adapters/market.js';
 import { headerBadges, applyHeaderBadges, HEADER_PROBE_PAGE } from '../adapters/header.js';
 import { isLoggedInDoc, login, CRED_KEY } from '../adapters/session.js';
+import { readFavourites } from '../lib/favourites.js';
 
 // Header badges that raise desktop notifications (the rest update silently).
 const NOTIFY_BADGES = {
@@ -266,11 +267,9 @@ export const liveUpdatesModule = {
             const prev = readFriendlyCache();
             const next = {};
             for (const mode of MODES) {
-                let favs = [];
-                try { favs = JSON.parse(core.storage.get(`clopus.market.favs.${mode || 'resources'}`, '[]')); } catch (e) { /* ignore */ }
                 for (const side of ['sell', 'buyer']) {
                     const visiting = !!visit && visit.side === side && (visit.mode || '') === mode;
-                    for (const id of favs) {
+                    for (const id of readFavourites(side, mode)) {
                         const key = `${mode || 'resources'}|${side}|${id}`;
                         const watched = marketNotifyEnabled(mode, side, id);
                         if (!watched && !visiting) {

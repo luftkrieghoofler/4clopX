@@ -11,6 +11,7 @@ src/
   core.js          module registry, serialized HTTP queue, settings registry,
                    DOM / storage / secret-storage helpers; knows no pages
   adapters/        everything that knows the server: protocols, HTML parsing
+  lib/             cross-cutting client state (e.g. favourite market lists)
   ui/              everything that renders. Never touches server HTML
 dist/clop.user.js  build output: the installable file
 ```

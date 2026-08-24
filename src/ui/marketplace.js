@@ -14,6 +14,7 @@ import {
 } from '../adapters/market.js';
 import { fetchResourceStats } from '../adapters/overview.js';
 import { readFriendlyCache, friendlyTotals } from './liveupdates.js';
+import { readFavourites, writeFavourites } from '../lib/favourites.js';
 
 const SIDES = [
     { side: 'sell', label: 'Sell Orders', hint: 'Listings from sellers — buy from them here.' },
@@ -57,7 +58,6 @@ export const marketplaceModule = {
         // sell and buy tabs each restore their own market.
         const lastKey = (side) => `clopus.market.last.${side}.${mode || 'resources'}`;
         const SHOW_DNA_KEY = 'clopus.market.showDna';
-        const FAVS_KEY = `clopus.market.favs.${mode || 'resources'}`;
         const FAVS_ONLY_KEY = 'clopus.market.favsOnly';
 
         /* ---------------- state ---------------- */
@@ -74,14 +74,19 @@ export const marketplaceModule = {
             busy: false,
             showDna: core.storage.get(SHOW_DNA_KEY, '0') === '1',
             favsOnly: core.storage.get(FAVS_ONLY_KEY, '0') === '1',
-            favs: new Set(),
+            favs: null,                            // {sell: Set, buyer: Set}, filled below
             friendly: { sell: {}, buyer: {} },     // resourceId -> {amount, count}
             upkeep: null,                          // resource stats from overview.php
             showHelp: false,
         };
 
-        try { state.favs = new Set(JSON.parse(core.storage.get(FAVS_KEY, '[]'))); } catch (e) { /* corrupt value */ }
-        const saveFavs = () => core.storage.set(FAVS_KEY, JSON.stringify([...state.favs]));
+        // Favourites are kept separately per side (and per mode).
+        state.favs = {
+            sell: new Set(readFavourites('sell', mode)),
+            buyer: new Set(readFavourites('buyer', mode)),
+        };
+        const favs = () => state.favs[state.side];
+        const saveFavs = () => writeFavourites(state.side, mode, favs());
 
         // Warm the alliance-order store from the shared live-update cache,
         // so favourite badges show instantly without a sweep.
@@ -366,7 +371,7 @@ export const marketplaceModule = {
              * keep it visible while "show DNA" is off. */
             const hasDna = state.resources.some((r) => isDna(r.name));
             const visible = state.resources.filter((r) => r.id === state.activeId
-                || state.favs.has(r.id)
+                || favs().has(r.id)
                 || (!state.favsOnly && (state.showDna || !isDna(r.name))));
             const tabs = el('ul', { class: 'nav nav-pills clop-tabs' });
             for (const r of visible) {
@@ -451,7 +456,7 @@ export const marketplaceModule = {
         // [orders(total)] alliance/friend badge for a tab — favourites and
         // the open market only.
         function badgeFor(id) {
-            if (id !== state.activeId && !state.favs.has(id)) return null;
+            if (id !== state.activeId && !favs().has(id)) return null;
             const f = state.friendly[state.side][id];
             if (!f || !f.count) return null;
             const what = state.side === 'sell' ? 'selling' : 'buying';
@@ -498,7 +503,7 @@ export const marketplaceModule = {
         }
 
         function favButton() {
-            const fav = state.favs.has(state.activeId);
+            const fav = favs().has(state.activeId);
             return el('button', {
                 class: `btn btn-sm ${fav ? 'btn-warning' : 'btn-default'} clop-action`,
                 type: 'button',
@@ -506,8 +511,8 @@ export const marketplaceModule = {
                     ? 'Stop counting alliance/friend orders for this market'
                     : 'Count alliance/friend orders for this market on every load and refresh',
                 onclick: () => {
-                    if (fav) state.favs.delete(state.activeId);
-                    else state.favs.add(state.activeId);
+                    if (fav) favs().delete(state.activeId);
+                    else favs().add(state.activeId);
                     saveFavs();
                     render();
                 },
