@@ -30,7 +30,7 @@ export const marketplaceModule = {
 
     init(core) {
         if (!parseToken(document)) {
-            console.warn('[CLOP-US] marketplace: no token on page (not logged in?), leaving page alone');
+            console.warn('[4clopX] marketplace: no token on page (not logged in?), leaving page alone');
             return;
         }
 
@@ -56,9 +56,9 @@ export const marketplaceModule = {
 
         // Last-visited resource is remembered per side (and per mode), so the
         // sell and buy tabs each restore their own market.
-        const lastKey = (side) => `clopus.market.last.${side}.${mode || 'resources'}`;
-        const SHOW_DNA_KEY = 'clopus.market.showDna';
-        const FAVS_ONLY_KEY = 'clopus.market.favsOnly';
+        const lastKey = (side) => `clopx.market.last.${side}.${mode || 'resources'}`;
+        const SHOW_DNA_KEY = 'clopx.market.showDna';
+        const FAVS_ONLY_KEY = 'clopx.market.favsOnly';
 
         /* ---------------- state ---------------- */
 
@@ -208,7 +208,7 @@ export const marketplaceModule = {
                 state.upkeep = await fetchResourceStats(core);
                 updateSellMaxUi();
             } catch (e) {
-                console.warn('[CLOP-US] upkeep fetch failed:', e);
+                console.warn('[4clopX] upkeep fetch failed:', e);
             } finally {
                 upkeepFetching = false;
             }

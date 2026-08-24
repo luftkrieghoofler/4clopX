@@ -7,12 +7,12 @@
 //
 // CROSS-TAB DESIGN: exactly one tab — the elected leader — polls; all
 // state is shared through localStorage and `storage` events:
-//   clopus.live.leader    {id, at}         heartbeat of the leader tab
-//   clopus.live.nextAt    number           when the next poll is due
-//   clopus.live.pollNow   number           "poll immediately" signal
-//   clopus.live.seen      number           last time any tab was visible
-//   clopus.live.badges    {at, values}     last header badge values
-//   clopus.live.friendly  {key: {...}}     the friendly-order cache, keyed
+//   clopx.live.leader    {id, at}         heartbeat of the leader tab
+//   clopx.live.nextAt    number           when the next poll is due
+//   clopx.live.pollNow   number           "poll immediately" signal
+//   clopx.live.seen      number           last time any tab was visible
+//   clopx.live.badges    {at, values}     last header badge values
+//   clopx.live.friendly  {key: {...}}     the friendly-order cache, keyed
 //                                          "mode|side|resourceId" (mode ''
 //                                          is stored as "resources")
 //
@@ -45,12 +45,12 @@ const NOTIFY_BADGES = {
 
 const MODES = ['', 'weapons', 'armor'];
 const K = {
-    leader: 'clopus.live.leader',
-    nextAt: 'clopus.live.nextAt',
-    pollNow: 'clopus.live.pollNow',
-    seen: 'clopus.live.seen',
-    badges: 'clopus.live.badges',
-    friendly: 'clopus.live.friendly',
+    leader: 'clopx.live.leader',
+    nextAt: 'clopx.live.nextAt',
+    pollNow: 'clopx.live.pollNow',
+    seen: 'clopx.live.seen',
+    badges: 'clopx.live.badges',
+    friendly: 'clopx.live.friendly',
 };
 
 function jget(key, fallback) {
@@ -85,7 +85,7 @@ export function friendlyTotals(mode, side) {
 // (keyed like the friendly cache); the default is ON for buy orders (offers
 // you can sell into — the actionable side) and OFF for sell orders.  A
 // future settings UI edits these through core.marketNotify.
-const NOTIFY_KEY = 'clopus.market.notify';
+const NOTIFY_KEY = 'clopx.market.notify';
 
 export function marketNotifyEnabled(mode, side, resourceId) {
     const overrides = jget(NOTIFY_KEY, {}) || {};
@@ -197,7 +197,7 @@ export const liveUpdatesModule = {
             if (anyoneLooking()) return;
             if (typeof Notification === 'undefined' || Notification.permission !== 'granted') return;
             try {
-                const n = new Notification('CLOP', { body, tag: `clopus-${tag}` });
+                const n = new Notification('CLOP', { body, tag: `clopx-${tag}` });
                 n.onclick = () => {
                     try { window.focus(); if (href) location.assign(href); n.close(); } catch (e) { /* ignore */ }
                 };
@@ -213,7 +213,7 @@ export const liveUpdatesModule = {
                 if (!creds || !creds.username || creds.disabled) return false;
                 const r = await login(core, creds.username, creds.password);
                 if (r.ok) {
-                    console.info('[CLOP-US] live updates: session re-established');
+                    console.info('[4clopX] live updates: session re-established');
                     return true;
                 }
                 if (/login incorrect/i.test(r.errors[0] || '')) {
@@ -248,7 +248,7 @@ export const liveUpdatesModule = {
                 jset(K.badges, { at: Date.now(), values });
                 await sweepFavourites(visit);
             } catch (e) {
-                console.warn('[CLOP-US] live update failed:', e);
+                console.warn('[4clopX] live update failed:', e);
             } finally {
                 polling = false;
                 if (!stopped) schedule();
@@ -417,7 +417,7 @@ export const liveUpdatesModule = {
             cdText.textContent = '✖';
             cdText.className = 'text-danger';
             cdLi.querySelector('a').title = `Live updates stopped: ${reason}`;
-            console.warn(`[CLOP-US] live updates stopped: ${reason}`);
+            console.warn(`[4clopX] live updates stopped: ${reason}`);
         }
 
         const cdText = el('span', { class: 'text-info' }, ['—']);

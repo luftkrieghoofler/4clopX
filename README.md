@@ -1,4 +1,4 @@
-# CLOP Dynamic UI userscript
+# 4clopX - CLOP Dynamic UI userscript
 
 A userscript for [CLOP](https://4clop.org) that replaces the marketplace with a dynamic single-page UI and adds optional auto-login.
 

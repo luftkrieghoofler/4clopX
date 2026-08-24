@@ -16,9 +16,9 @@
 // and attempts are throttled per tab.
 
 import { isLoggedInDoc, findLoginForm, login, CRED_KEY } from '../adapters/session.js';
-const LAST_GOOD = 'clopus.nav.lastGood';
-const LAST_CLICK = 'clopus.nav.lastClick';
-const ATTEMPT_AT = 'clopus.autologin.attemptAt';
+const LAST_GOOD = 'clopx.nav.lastGood';
+const LAST_CLICK = 'clopx.nav.lastClick';
+const ATTEMPT_AT = 'clopx.autologin.attemptAt';
 
 // Pages that are pointless to "return" to after a re-login.
 const RETURN_BLACKLIST = new Set(['', 'index.php', 'login.php', 'logout.php', 'nonation.php', 'newuser.php']);
@@ -52,7 +52,7 @@ export const autologinModule = {
 
         core.autologin = {
             forget: () => core.secrets.remove(CRED_KEY)
-                .then(() => console.info('[CLOP-US] stored credentials removed')),
+                .then(() => console.info('[4clopX] stored credentials removed')),
         };
 
         // Record every same-origin link click BEFORE navigation: if the next
@@ -122,7 +122,7 @@ async function maybeAutoLogin(core, form) {
     // A fresh logout click means the user wants OUT — don't fight them.
     const lastClick = sget(LAST_CLICK);
     if (lastClick && pageOf(lastClick.href) === 'logout.php' && Date.now() - lastClick.at < 60000) {
-        console.info('[CLOP-US] auto-login skipped: you just logged out');
+        console.info('[4clopX] auto-login skipped: you just logged out');
         return;
     }
 

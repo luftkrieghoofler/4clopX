@@ -4,7 +4,7 @@
 // (what gets rendered).
 
 export const core = {
-    version: __CLOPUS_VERSION__,
+    version: __CLOPX_VERSION__,
     modules: [],
 
     // A module is { name, matches(page, location), init(core) } where `page`
@@ -21,9 +21,9 @@ export const core = {
             if (!use) continue;
             try {
                 mod.init(this);
-                console.info(`[CLOP-US] module "${mod.name}" active`);
+                console.info(`[4clopX] module "${mod.name}" active`);
             } catch (e) {
-                console.error(`[CLOP-US] module "${mod.name}" failed to init:`, e);
+                console.error(`[4clopX] module "${mod.name}" failed to init:`, e);
             }
         }
     },
@@ -92,7 +92,7 @@ export const core = {
      * Registry of user-editable settings.  Modules declare theirs with
      * define() at init; a future settings UI will enumerate all() to build
      * itself, so every toggleable behavior must be declared here even while
-     * no UI exists.  Values persist under clopus.setting.<key>. */
+     * no UI exists.  Values persist under clopx.setting.<key>. */
 
     settings: {
         _defs: new Map(),
@@ -108,7 +108,7 @@ export const core = {
 
         get(key) {
             const def = this._defs.get(key);
-            const raw = core.storage.get(`clopus.setting.${key}`);
+            const raw = core.storage.get(`clopx.setting.${key}`);
             if (raw === null) return def ? def.default : null;
             if (def && def.type === 'bool') return raw === '1';
             if (def && def.type === 'number') {
@@ -121,7 +121,7 @@ export const core = {
         set(key, value) {
             const def = this._defs.get(key);
             const raw = def && def.type === 'bool' ? (value ? '1' : '0') : String(value);
-            core.storage.set(`clopus.setting.${key}`, raw);
+            core.storage.set(`clopx.setting.${key}`, raw);
         },
     },
 
@@ -137,7 +137,7 @@ export const core = {
         },
         emit(type, data) {
             for (const fn of this._handlers.get(type) || []) {
-                try { fn(data); } catch (e) { console.error(`[CLOP-US] event handler for "${type}" failed:`, e); }
+                try { fn(data); } catch (e) { console.error(`[4clopX] event handler for "${type}" failed:`, e); }
             }
         },
     },

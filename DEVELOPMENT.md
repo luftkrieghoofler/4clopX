@@ -33,7 +33,7 @@ npm run watch      # rebuild dist/clop.user.js on every source change
 
 Install the script in Violentmonkey from `file:///.../dist/clop.user.js` — it offers to track the file, so a page reload picks up every rebuild. (Tampermonkey can do the same if "Allow access to file URLs" is enabled for the extension.) For a local dev instance, add a `@match` line to `src/meta.txt`.
 
-The script exports a debug handle to the page window: `CLOPUS` (e.g. `CLOPUS.settings.all()`, `CLOPUS.autologin.forget()`, or registering an ad-hoc module from the console).
+The script exports a debug handle to the page window: `clopX` (e.g. `clopX.settings.all()`, `clopX.autologin.forget()`, or registering an ad-hoc module from the console).
 
 ## Releasing
 

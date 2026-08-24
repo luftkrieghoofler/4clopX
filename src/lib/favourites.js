@@ -1,9 +1,9 @@
 // Per-side favourite market lists, stored as
-// clopus.market.favs.<side>.<mode> (side: 'sell' | 'buyer'; mode '' is
+// clopx.market.favs.<side>.<mode> (side: 'sell' | 'buyer'; mode '' is
 // stored as "resources").  Shared by the marketplace UI (tab filters,
 // badges, the ★ button) and the live-update sweep.
 
-const key = (side, mode) => `clopus.market.favs.${side}.${mode || 'resources'}`;
+const key = (side, mode) => `clopx.market.favs.${side}.${mode || 'resources'}`;
 
 // -> array of resource ids
 export function readFavourites(side, mode) {

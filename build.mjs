@@ -1,6 +1,6 @@
 // Bundles src/ (ES modules) into a single Greasemonkey-compatible userscript.
 // The ==UserScript== banner lives in src/meta.txt and is prepended verbatim;
-// its @version is injected into the code as __CLOPUS_VERSION__.
+// its @version is injected into the code as __CLOPX_VERSION__.
 import { readFileSync } from 'node:fs';
 import * as esbuild from 'esbuild';
 
@@ -15,14 +15,14 @@ const options = {
     target: 'es2020',
     charset: 'utf8',
     banner: { js: meta + '\n' },
-    define: { __CLOPUS_VERSION__: JSON.stringify(version) },
+    define: { __CLOPX_VERSION__: JSON.stringify(version) },
 };
 
 if (process.argv.includes('--watch')) {
     const ctx = await esbuild.context(options);
     await ctx.watch();
-    console.log('[clop-userscript] watching src/ -> dist/clop.user.js');
+    console.log('[4clopx] watching src/ -> dist/clop.user.js');
 } else {
     await esbuild.build(options);
-    console.log(`[clop-userscript] built dist/clop.user.js (v${version})`);
+    console.log(`[4clopx] built dist/clop.user.js (v${version})`);
 }

@@ -14,7 +14,7 @@ core.boot();
 // GM grants the script runs in the manager's sandbox, so export to the real
 // page window where possible.
 try {
-    (typeof unsafeWindow !== 'undefined' ? unsafeWindow : window).CLOPUS = core;
+    (typeof unsafeWindow !== 'undefined' ? unsafeWindow : window).clopX = core;
 } catch (e) {
-    window.CLOPUS = core;
+    window.clopX = core;
 }

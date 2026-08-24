@@ -1,6 +1,6 @@
 // ==UserScript==
-// @name         CLOP Dynamic UI
-// @namespace    clop-userscript
+// @name         4clopX
+// @namespace    4clopx
 // @version      0.3.0
 // @description  Modular client-side UI replacement for CLOP. Merged dynamic marketplace (sell/buy orders in one page).
 // @match        https://4clop.org/*
