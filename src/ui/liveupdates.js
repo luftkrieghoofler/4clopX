@@ -12,6 +12,7 @@
 //   clopx.live.pollNow   number           "poll immediately" signal
 //   clopx.live.seen      number           last time any tab was visible
 //   clopx.live.badges    {at, values}     last header badge values
+//   clopx.live.polled    number           a poll cycle finished (signal)
 //   clopx.live.friendly  {key: {...}}     the friendly-order cache, keyed
 //                                          "mode|side|resourceId" (mode ''
 //                                          is stored as "resources")
@@ -59,6 +60,7 @@ const K = {
     pollNow: 'clopx.live.pollNow',
     seen: 'clopx.live.seen',
     badges: 'clopx.live.badges',
+    polled: 'clopx.live.polled',
     friendly: 'clopx.live.friendly',
 };
 
@@ -154,7 +156,9 @@ export function forgetMarket(mode, side, resourceId) {
     }
 }
 
-export function setMarketNotify(mode, side, resourceId, on) {
+// Private: all toggling goes through core.marketNotify.set, which layers
+// the UI refresh and the seed fetch on top.
+function setMarketNotify(mode, side, resourceId, on) {
     const key = `${mode || 'resources'}|${side}|${resourceId}`;
     const overrides = jget(NOTIFY_KEY, {}) || {};
     overrides[key] = !!on;
@@ -367,11 +371,11 @@ export const liveUpdatesModule = {
                     if (what && c.to > c.from) notify(`${c.to} ${what}`, c.key, c.key);
                 }
                 updateTitle();
-                // poll:true lets other tabs tell a completed poll cycle
-                // apart from a mere page-load badge publish.
-                jset(K.badges, { at: Date.now(), values, poll: true });
+                jset(K.badges, { at: Date.now(), values });
                 await sweepFavourites();
-                // Cycle done — marketplace tabs refresh their open market.
+                // Cycle done — marketplace tabs (this one directly, others
+                // via the K.polled storage event) refresh their open market.
+                jset(K.polled, Date.now());
                 core.events.emit('live:polled', {});
             } catch (e) {
                 console.warn('[4clopX] live update failed:', e);
@@ -381,72 +385,76 @@ export const liveUpdatesModule = {
             }
         }
 
-        // One request per WATCHED favourite market (see marketNotifyEnabled:
-        // buy-order favourites by default; edited in the settings panel).
-        // Unwatched markets are never swept — they refresh only when their
-        // tab is opened.  The previous cache is the notification baseline
-        // (first-ever sweep of a market is silent).  The cache is rebuilt
-        // wholesale so unwatched/unfavourited markets drop out, and written
-        // only after a fully successful sweep.
+        // One request per target per poll.  Targets are the WATCHED
+        // favourites (cacheable: they feed the cache, all badge totals, and
+        // notifications) plus — ad hoc — the market open in THIS tab's
+        // marketplace when unwatched (view-only: its snapshot is adopted by
+        // the view; it never enters the cache and never notifies).  The
+        // list is rebuilt every sweep from the favourites and the current
+        // market:viewing announcement, so navigating between market tabs,
+        // sides, or away from the market is picked up automatically.
+        // viewIsFresh() drops any target the view itself loaded moments ago
+        // (its load is what triggered this poll).  The previous cache is
+        // the notification baseline (first-ever sweep of a market is
+        // silent); the cache is rebuilt wholesale so unwatched/unfavourited
+        // markets drop out, and written only after every cacheable target
+        // succeeded.
         async function sweepFavourites() {
             const prev = readFriendlyCache();
             const next = {};
+
+            const targets = [];
             for (const mode of MODES) {
                 for (const side of ['sell', 'buyer']) {
                     for (const fav of readFavourites(side, mode)) {
                         if (!marketNotifyEnabled(mode, side, fav.id)) continue;
-                        const key = `${mode || 'resources'}|${side}|${fav.id}`;
-                        // Just self-loaded by the view whose load triggered
-                        // this poll: its cache entry is already fresh (and
-                        // the baseline advanced), so carry it over.
-                        if (viewIsFresh(mode, side, fav.id)) {
-                            if (prev[key]) next[key] = prev[key];
-                            continue;
-                        }
-                        const snap = await marketAdapter(core, side, mode).load(fav.id);
-                        const summary = summarizeFriendly(snap.orders);
-                        const res = snap.resources.find((r) => r.id === fav.id);
-                        next[key] = { ...summary, name: res ? res.name : (fav.name || `resource ${fav.id}`), at: Date.now() };
-                        // snap rides along so a marketplace view of this
-                        // market in THIS tab can adopt the full data instead
-                        // of re-fetching it (cross-tab only the summary
-                        // travels, via the cache).
-                        core.events.emit('market:friendly', { mode, side, resourceId: fav.id, summary, snap });
-                        const p = prev[key];
-                        if (p && (summary.count > p.count || summary.amount > p.amount)) {
-                            notify(
-                                `Alliance/friend ${side === 'sell' ? 'sell' : 'buy'} orders in ${next[key].name}: ` +
-                                `${summary.count} (${core.commas(summary.amount)})`,
-                                marketPageUrl(side, mode),
-                                `market-${key}`);
-                        }
+                        targets.push({ mode, side, resourceId: fav.id, name: fav.name, cacheable: true });
                     }
                 }
             }
-            jset(K.friendly, next);
-            core.events.emit('market:friendlyCache', {});
-
-            // Ad-hoc target: the market open in THIS tab's marketplace joins
-            // every sweep even when unwatched, so the view refreshes through
-            // the same snapshot path as watched markets — but it stays out
-            // of the cache and never notifies.  (Watched open markets were
-            // already swept above.)
             const v = currentView;
-            // Skipped when the view itself just loaded — same rule as the
-            // watched loop above.
-            if (v && v.resourceId
-                && !viewIsFresh(v.mode, v.side, v.resourceId)
-                && !marketNotifyEnabled(v.mode, v.side, v.resourceId)) {
+            if (v && v.resourceId && !marketNotifyEnabled(v.mode, v.side, v.resourceId)) {
+                targets.push({ mode: v.mode, side: v.side, resourceId: v.resourceId, cacheable: false });
+            }
+
+            for (const t of targets) {
+                const key = `${t.mode || 'resources'}|${t.side}|${t.resourceId}`;
+                if (viewIsFresh(t.mode, t.side, t.resourceId)) {
+                    // Its cache entry (when cacheable) is already fresh and
+                    // the baseline advanced — carry it over.
+                    if (t.cacheable && prev[key]) next[key] = prev[key];
+                    continue;
+                }
+                let snap;
                 try {
-                    const snap = await marketAdapter(core, v.side, v.mode).load(v.resourceId);
-                    core.events.emit('market:friendly', {
-                        mode: v.mode, side: v.side, resourceId: v.resourceId,
-                        summary: summarizeFriendly(snap.orders), snap,
-                    });
+                    snap = await marketAdapter(core, t.side, t.mode).load(t.resourceId);
                 } catch (e) {
+                    if (t.cacheable) throw e;   // abort: don't write a partial cache
                     console.warn('[4clopX] open-market refresh failed:', e);
+                    continue;
+                }
+                const summary = summarizeFriendly(snap.orders);
+                // snap rides along so a marketplace view of this market in
+                // THIS tab can adopt the full data instead of re-fetching it
+                // (cross-tab only summaries travel, via the cache).
+                core.events.emit('market:friendly', {
+                    mode: t.mode, side: t.side, resourceId: t.resourceId, summary, snap,
+                });
+                if (!t.cacheable) continue;
+                const res = snap.resources.find((r) => r.id === t.resourceId);
+                next[key] = { ...summary, name: res ? res.name : (t.name || `resource ${t.resourceId}`), at: Date.now() };
+                const p = prev[key];
+                if (p && (summary.count > p.count || summary.amount > p.amount)) {
+                    notify(
+                        `Alliance/friend ${t.side === 'sell' ? 'sell' : 'buy'} orders in ${next[key].name}: ` +
+                        `${summary.count} (${core.commas(summary.amount)})`,
+                        marketPageUrl(t.side, t.mode),
+                        `market-${key}`);
                 }
             }
+
+            jset(K.friendly, next);
+            core.events.emit('market:friendlyCache', {});
         }
 
         /* ---------------- leader election ---------------- */
@@ -637,24 +645,13 @@ export const liveUpdatesModule = {
                 if (rec && rec.values) {
                     applyHeaderBadges(rec.values);
                     updateTitle();
-                    if (rec.poll) core.events.emit('live:polled', {});
                 }
+            } else if (ev.key === K.polled) {
+                // Another tab finished a poll cycle.
+                core.events.emit('live:polled', {});
             } else if (ev.key === K.friendly) {
-                let oldv = {}, newv = {};
-                try { oldv = JSON.parse(ev.oldValue || '{}') || {}; } catch (e) { /* ignore */ }
-                try { newv = JSON.parse(ev.newValue || '{}') || {}; } catch (e) { /* ignore */ }
-                for (const [key, v] of Object.entries(newv)) {
-                    const o = oldv[key];
-                    if (!o || o.count !== v.count || o.amount !== v.amount) {
-                        const [m, side, resourceId] = key.split('|');
-                        core.events.emit('market:friendly', {
-                            mode: m === 'resources' ? '' : m,
-                            side,
-                            resourceId,
-                            summary: { count: v.count, amount: v.amount },
-                        });
-                    }
-                }
+                // Badge data lives in the cache itself; consumers just
+                // recompute from it.
                 core.events.emit('market:friendlyCache', {});
             } else if (ev.key === NOTIFY_KEY) {
                 // Watch flags changed in another tab: refresh flag-dependent

@@ -78,7 +78,6 @@ export const marketplaceModule = {
             showDna: core.storage.get(SHOW_DNA_KEY, '0') === '1',
             favsOnly: core.storage.get(FAVS_ONLY_KEY, '0') === '1',
             favs: null,                            // {sell: Set, buyer: Set}, filled below
-            friendly: { sell: {}, buyer: {} },     // resourceId -> {amount, count}
             upkeep: null,                          // resource stats from overview.php
             showHelp: false,
         };
@@ -92,13 +91,6 @@ export const marketplaceModule = {
         const favs = () => state.favs[state.side];
         const saveFavs = () => writeFavourites(state.side, mode,
             [...favs()].map((id) => ({ id, name: resourceName(id) })));
-
-        // Warm the alliance-order store from the shared live-update cache,
-        // so favourite badges show instantly without a sweep.
-        for (const [key, v] of Object.entries(readFriendlyCache())) {
-            const [m, side, id] = key.split('|');
-            if (m === (mode || 'resources')) state.friendly[side][id] = { count: v.count, amount: v.amount };
-        }
 
         const boot = adapters[hostKind].snapshotFromDocument(document);
         state.funds = boot.funds;
@@ -140,23 +132,18 @@ export const marketplaceModule = {
         // stand out against the auxiliary price info around them.
         const bold = (text) => el('strong', {}, [text]);
 
-        // Live-update sweeps (ui/liveupdates.js, any tab) feed the tab and
-        // side badges as their results arrive.  A sweep in THIS tab ships
-        // the full snapshot: if it's the open market, adopt it directly —
-        // the cycle-end live:polled fallback then stands down.
+        // A sweep in THIS tab ships full snapshots: adopt the open market's
+        // in place of a reload of our own (the cycle-end live:polled
+        // fallback then stands down).  Badge data lives in the shared cache
+        // and is patched via market:friendlyCache — no local copy.
         let adoptedThisCycle = false;
         core.events.on('market:friendly', (d) => {
-            if (d.mode !== mode) return;
-            state.friendly[d.side][d.resourceId] = d.summary;
-            if (state.busy) return;
+            if (d.mode !== mode || state.busy) return;
             if (d.snap && d.side === state.side && d.resourceId === state.activeId && !ordersInputPending()) {
                 adoptedThisCycle = true;
                 if (merge(d.snap, { auto: true })) render();
                 else refreshOrdersView();
-                return;
             }
-            if (d.side === state.side) updateBadges();
-            updateSideTabBadges();
         });
         core.events.on('market:friendlyCache', () => {
             if (state.busy) return;
@@ -195,15 +182,14 @@ export const marketplaceModule = {
 
         const adapter = () => adapters[state.side];
 
-        // Track a market's friendly orders from a fresh response — locally,
-        // and (for watched markets) in the shared live-update cache, so
-        // filling an alliance order updates the blue badges, tab title, and
-        // other tabs immediately instead of at the next sweep.
+        // Record a watched market's friendly orders into the shared cache
+        // from a fresh response, so filling an alliance order updates the
+        // blue badges, tab title, and other tabs immediately instead of at
+        // the next sweep.  (Unwatched markets carry no badges, so there's
+        // nothing to record.)
         function recordFriendly(side, resourceId, orders) {
-            const summary = summarizeFriendly(orders);
-            state.friendly[side][resourceId] = summary;
-            if (marketNotifyEnabled(mode, side, resourceId)
-                && writeFriendlyCacheEntry(mode, side, resourceId, summary, resourceName(resourceId))) {
+            if (!marketNotifyEnabled(mode, side, resourceId)) return;
+            if (writeFriendlyCacheEntry(mode, side, resourceId, summarizeFriendly(orders), resourceName(resourceId))) {
                 core.events.emit('market:friendlyCache', {});
             }
         }
@@ -580,11 +566,11 @@ export const marketplaceModule = {
             }, ['👁']);
         }
 
-        // [orders (total)] alliance/friend badge for a tab — watched markets
-        // only, so every badge shown contributes to the header/menu totals.
+        // [orders (total)] alliance/friend badge for a tab, straight from
+        // the shared cache — which holds exactly the watched markets, so
+        // every badge shown contributes to the header/menu totals.
         function badgeFor(id) {
-            if (!marketNotifyEnabled(mode, state.side, id)) return null;
-            const f = state.friendly[state.side][id];
+            const f = readFriendlyCache()[`${mode || 'resources'}|${state.side}|${id}`];
             if (!f || !f.count) return null;
             const what = state.side === 'sell' ? 'selling' : 'buying';
             return el('span', {
