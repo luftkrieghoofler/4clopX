@@ -14,7 +14,7 @@ import {
 } from '../adapters/market.js';
 import { fetchResourceStats } from '../adapters/overview.js';
 import {
-    readFriendlyCache, friendlyTotals, writeFriendlyCacheEntry, marketNotifyEnabled,
+    readFriendlyCache, friendlyTotals, writeFriendlyCacheEntry, marketNotifyEnabled, forgetMarket,
 } from './liveupdates.js';
 import { favouriteIds, writeFavourites } from '../lib/favourites.js';
 
@@ -548,6 +548,17 @@ export const marketplaceModule = {
                     if (fav) favs().delete(state.activeId);
                     else favs().add(state.activeId);
                     saveFavs();
+                    if (fav) {
+                        // Unfavourite = forget: drop the watch override and
+                        // cached counts so totals adjust immediately and a
+                        // re-favourite starts from the side defaults.
+                        forgetMarket(mode, state.side, state.activeId);
+                        core.events.emit('market:friendlyCache', {});
+                    } else {
+                        // A fresh favourite may be watched by default (buy
+                        // side): seed the cache from the open market's data.
+                        recordFriendly(state.side, state.activeId, state.orders);
+                    }
                     render();
                 },
             }, [fav ? '★ Unfavourite Market' : '☆ Favourite Market']);

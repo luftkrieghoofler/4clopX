@@ -130,9 +130,28 @@ export function watchedOrderTotal() {
 const NOTIFY_KEY = 'clopx.market.notify';
 
 export function marketNotifyEnabled(mode, side, resourceId) {
+    // Watched ⊆ favourites: an unfavourited market is never watched, no
+    // matter what the side default or a stale override says.
+    if (!readFavourites(side, mode).some((f) => f.id === resourceId)) return false;
     const overrides = jget(NOTIFY_KEY, {}) || {};
     const v = overrides[`${mode || 'resources'}|${side}|${resourceId}`];
     return typeof v === 'boolean' ? v : side === 'buyer';
+}
+
+// Unfavouriting a market forgets its watch override and cached counts, so
+// a later re-favourite starts from the side defaults again.
+export function forgetMarket(mode, side, resourceId) {
+    const key = `${mode || 'resources'}|${side}|${resourceId}`;
+    const overrides = jget(NOTIFY_KEY, {}) || {};
+    if (key in overrides) {
+        delete overrides[key];
+        jset(NOTIFY_KEY, overrides);
+    }
+    const cache = readFriendlyCache();
+    if (cache[key]) {
+        delete cache[key];
+        jset(K.friendly, cache);
+    }
 }
 
 export function setMarketNotify(mode, side, resourceId, on) {
