@@ -25,6 +25,7 @@ const SIDES = [
 ];
 const DEFAULT_BUY_ORDER_PRICE = '1000';
 const NEGATIVE_NET_CONFIRM_KEY = 'market.negativeNetSellConfirmMode';
+const OTHER_ORDER_DISPLAY_KEY = 'market.otherOrderDisplay';
 
 export function sellRevenueAfterTax(quantity, unitPrice, sellMultiplier) {
     return Math.floor(unitPrice * quantity * sellMultiplier);
@@ -46,6 +47,10 @@ export function unitPriceForSellRevenue(quantity, targetRevenue, sellMultiplier)
 
 export function saleWouldDipBelowReserve(stock, amount, reserve) {
     return amount > 0 && stock - amount < reserve;
+}
+
+export function orderShouldStayEmphasized(order) {
+    return !!order.own || order.relation === 'alliance' || order.relation === 'friend';
 }
 
 export const marketplaceModule = {
@@ -76,6 +81,20 @@ export const marketplaceModule = {
             type: 'bool',
             default: true,
             section: 'Market',
+        });
+        core.settings.define({
+            key: OTHER_ORDER_DISPLAY_KEY,
+            label: 'Orders from outside your alliance and friends',
+            description: 'Hide or fade market rows belonging to other nations. Your own orders always remain fully visible.',
+            type: 'choice',
+            options: [
+                { value: 'hide', label: 'Hide' },
+                { value: 'fade', label: 'Fade' },
+                { value: 'normal', label: 'Show normally' },
+            ],
+            default: 'fade',
+            section: 'Market',
+            onChange: () => core.events.emit('market:orderDisplayChanged', {}),
         });
     },
 
@@ -468,6 +487,8 @@ export const marketplaceModule = {
             #clop-market-root td { vertical-align: middle !important; }
             #clop-market-root .clop-row-actions { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
             #clop-market-root .clop-row-actions form { margin: 0; display: flex; align-items: center; gap: 6px; }
+            #clop-market-root tr.clop-order-faded > td { opacity: .58; filter: saturate(.55); transition: opacity .12s, filter .12s; }
+            #clop-market-root tr.clop-order-faded:hover > td { opacity: .78; filter: saturate(.75); }
             #clop-market-root .clop-buyn { width: 150px; }
             #clop-market-root .clop-amount-note { white-space: nowrap; }
             #clop-market-root .clop-tabsbar { display: flex; align-items: flex-start; gap: 10px; }
@@ -647,6 +668,10 @@ export const marketplaceModule = {
             ordersBox.textContent = '';
             ordersBox.appendChild(renderOrders());
         }
+
+        core.events.on('market:orderDisplayChanged', () => {
+            if (!state.busy) renderOrdersInto();
+        });
 
         // Background refresh: rebuild the orders table and patch the funds
         // and "updated" stamps in place — the place form and message area
@@ -1021,6 +1046,18 @@ export const marketplaceModule = {
                 return el('div', { class: 'alert alert-warning' }, [msg]);
             }
 
+            const display = core.settings.get(OTHER_ORDER_DISPLAY_KEY);
+            const visibleOrders = state.orders
+                .map((order, idx) => ({ order, idx }))
+                .filter(({ order }) => display !== 'hide' || orderShouldStayEmphasized(order));
+            if (!visibleOrders.length) {
+                const count = state.orders.length;
+                return el('div', { class: 'alert alert-info' }, [
+                    `No alliance or friend orders to show — ${core.commas(count)} other ` +
+                    `order${count === 1 ? '' : 's'} hidden by your market setting.`,
+                ]);
+            }
+
             const thead = el('thead', {}, [el('tr', {}, (
                 state.side === 'sell'
                     ? ['Unit Price', 'Units Available', 'Seller', 'Actions']
@@ -1028,12 +1065,12 @@ export const marketplaceModule = {
             ).map((h) => el('th', {}, [h])))]);
 
             const tbody = el('tbody');
-            state.orders.forEach((order, idx) => tbody.appendChild(renderOrderRow(order, idx)));
+            visibleOrders.forEach(({ order, idx }) => tbody.appendChild(renderOrderRow(order, idx, display)));
 
             return el('table', { class: 'table table-striped table-bordered table-condensed' }, [thead, tbody]);
         }
 
-        function renderOrderRow(order, idx) {
+        function renderOrderRow(order, idx, display) {
             const sell = state.side === 'sell';
             const priceCell = el('td', {}, [el('span', { class: 'text-danger' }, [bold(core.commas(order.price))])]);
             const unit = (mult) => core.commas(Math.floor(order.price * mult));
@@ -1083,7 +1120,10 @@ export const marketplaceModule = {
                     (n) => `get ${core.commas(Math.floor(order.price * n * state.mult.sell))} bits`));
             }
 
-            return el('tr', { 'data-idx': String(idx) }, [
+            return el('tr', {
+                class: display === 'fade' && !orderShouldStayEmphasized(order) ? 'clop-order-faded' : '',
+                'data-idx': String(idx),
+            }, [
                 priceCell,
                 el('td', {}, [el('span', { class: 'text-success' }, [core.commas(order.amount)])]),
                 el('td', { html: order.ownerHtml }),

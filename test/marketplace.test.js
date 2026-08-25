@@ -2,7 +2,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import {
-    saleWouldDipBelowReserve, sellRevenueAfterTax, unitPriceForSellRevenue,
+    orderShouldStayEmphasized, saleWouldDipBelowReserve,
+    sellRevenueAfterTax, unitPriceForSellRevenue,
 } from '../src/ui/marketplace.js';
 
 test('calculates the lowest unit price that meets an after-tax revenue target', () => {
@@ -33,4 +34,12 @@ test('detects sales that cross the protected reserve boundary', () => {
     assert.equal(saleWouldDipBelowReserve(100, 1, 100), true);
     assert.equal(saleWouldDipBelowReserve(150, 50, 100), false);
     assert.equal(saleWouldDipBelowReserve(150, 51, 100), true);
+});
+
+test('keeps alliance, friend, and own orders emphasized', () => {
+    assert.equal(orderShouldStayEmphasized({ own: false, relation: 'alliance' }), true);
+    assert.equal(orderShouldStayEmphasized({ own: false, relation: 'friend' }), true);
+    assert.equal(orderShouldStayEmphasized({ own: true, relation: null }), true);
+    assert.equal(orderShouldStayEmphasized({ own: false, relation: 'enemy' }), false);
+    assert.equal(orderShouldStayEmphasized({ own: false, relation: null }), false);
 });
