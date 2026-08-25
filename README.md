@@ -8,20 +8,20 @@ Install a userscript manager (Violentmonkey, Tampermonkey, or Greasemonkey), the
 
 ## What changes
 
-Live updates and notifications: the stock notifications - messages, alliance, deals, incoming attacks, polls - refresh periodically without reloading the page, and support desktop notifications. Click on the the timer in the navbar to refresh immediately.
+**Live updates and notifications**: the stock notifications (messages, alliance, incoming attacks etc.), alliance marketplace orders, and open marketplace pages refresh periodically without reloading the page, and support desktop notifications. Click on the the timer in the navbar to refresh immediately.
 
-Marketplace (resources, weapons, and armor modes):
+**Auto-login**: if enabled, when the game expires your session the script logs you back in and takes you to the page you were trying to open instead of the login screen.
+
+**Marketplace**:
 
 - Sell orders and buy orders become one page with two tabs. Switching sides, switching resources, buying, selling, placing and removing orders all happen in place, without page loads. The stock menu entries still work and open the side they always led to.
 - No more "Try again." on refresh; there is a proper Refresh button, and page reload works seamlessly in the market.
 - Resource tabs have a toggle to hide DNA resources and one to show ★ favourites only, to declutter the amount of tabs.
 - Prices are shown as what you'll actually pay or receive (your economic-type multipliers applied), including live totals for Buy All / Sell All and custom amounts. Sell listings can be priced per item or from a desired total after tax.
-- When selling to buy orders, your upkeep is protected: the sell button is an orange **Sell All** when you can fill the whole order, and turns into a blue **Sell Max** selling exactly your spare stock when filling it all would cut into your upkeep.
+- When selling to buy orders, your upkeep is protected: the sell button is **Sell All** when you can fill the whole order, and turns into **Sell Max** selling exactly your spare stock when filling it all would cut into your upkeep.
+- An (optional) confirmation dialog protects against accidentally selling off stockpiles you need for upkeep, or selling away a resource that you don't produce yourself.
 - Orders from outside your alliance and friends can be shown normally, faded, or hidden; your own orders always remain visible.
-- Tabs can show how much alliance mates and friends are trading in each ★ favourite market you 👁 watch, optinally also including resources where your stockpiles are empty. These auto-refresh with the live update timer and can generate desktop notifications.
-- The last-viewed resource is remembered per side.
-
-Auto-login (opt-in): when the game expires your session, the script logs you back in and takes you to the page you were trying to open instead of the login screen.
+- Tabs can show how much alliance mates and friends are trading in each ★ favourite market you 👁 watch, optionally also including resources where your stockpiles are empty. These auto-refresh with the live update timer and can generate desktop notifications.
 
 ## More info
 

@@ -72,16 +72,16 @@ function parseFunds(doc) {
 }
 
 // "(Have N)" suffixes come straight from the server's option list.
-function parseResources(doc) {
+export function marketResourcesFromDocument(doc) {
     const out = [];
     for (const opt of doc.querySelectorAll('select[name="resource_id"] option')) {
         if (!opt.value) continue;
         const label = opt.textContent.trim();
-        const m = label.match(/^(.*?)\s*\(Have (\d+)\)$/);
+        const m = label.match(/^(.*?)\s*\(Have ([\d,]+)\)$/);
         out.push({
             id: opt.value,
             name: m ? m[1] : label,
-            have: m ? parseInt(m[2], 10) : 0,
+            have: m ? parseInt(m[2].replace(/,/g, ''), 10) : 0,
             selected: opt.hasAttribute('selected'),
         });
     }
@@ -224,7 +224,7 @@ export function createMarketAdapter(core, kind, mode, seedDoc = null) {
             resourceId,
             funds: parseFunds(doc),
             mult: parseMultipliers(doc),
-            resources: parseResources(doc),
+            resources: marketResourcesFromDocument(doc),
             orders: parseOrders(doc),
             messages,
         };

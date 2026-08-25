@@ -5,7 +5,7 @@ import {
     orderShouldStayEmphasized, saleWouldDipBelowReserve,
     sellRevenueAfterTax, unitPriceForSellRevenue,
 } from '../src/ui/marketplace.js';
-import { summarizeFriendly } from '../src/adapters/market.js';
+import { marketResourcesFromDocument, summarizeFriendly } from '../src/adapters/market.js';
 import {
     buyerResourceHasSpare, friendlyTotals, watchedOrderTotals, writeFriendlyCacheEntry,
 } from '../src/ui/liveupdates.js';
@@ -46,6 +46,18 @@ test('keeps alliance, friend, and own orders emphasized', () => {
     assert.equal(orderShouldStayEmphasized({ own: true, relation: null }), true);
     assert.equal(orderShouldStayEmphasized({ own: false, relation: 'enemy' }), false);
     assert.equal(orderShouldStayEmphasized({ own: false, relation: null }), false);
+});
+
+test('parses named market resources and comma-formatted stock amounts', () => {
+    const options = [
+        { value: '', textContent: 'Pick one', hasAttribute: () => false },
+        { value: '7', textContent: 'Coffee (Have 12,345)', hasAttribute: (name) => name === 'selected' },
+    ];
+    const doc = { querySelectorAll: () => options };
+
+    assert.deepEqual(marketResourcesFromDocument(doc), [{
+        id: '7', name: 'Coffee', have: 12345, selected: true,
+    }]);
 });
 
 test('splits friendly orders into actionable and unavailable totals', () => {

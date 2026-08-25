@@ -17,7 +17,9 @@ import {
     readFriendlyCache, friendlyTotals, writeFriendlyCacheEntry,
     marketNotifyEnabled, forgetMarket, UNAVAILABLE_SUMMARY_BADGES_KEY,
 } from './liveupdates.js';
-import { favouriteIds, writeFavourites, writeResourceOrder } from '../lib/favourites.js';
+import {
+    favouriteIds, writeFavourites, writeMarketCatalog, favouriteStorageChange,
+} from '../lib/favourites.js';
 
 const SIDES = [
     { side: 'sell', label: 'Sell Orders', hint: 'Listings from sellers — buy from them here.' },
@@ -160,7 +162,7 @@ export const marketplaceModule = {
         state.orders = boot.orders;
         // Cache the server's resource order (used to sort favourite lists,
         // e.g. in the settings panel).
-        if (state.resources.length) writeResourceOrder(mode, state.resources.map((r) => r.id));
+        if (state.resources.length) writeMarketCatalog(mode, state.resources);
         if (boot.resourceId) {
             state.activeId = boot.resourceId;
             recordFriendly(hostKind, boot.resourceId, boot.orders);
@@ -211,6 +213,26 @@ export const marketplaceModule = {
             updateBadges();          // watch flags may have changed too
             updateSideTabBadges();
             updateWatchButton();
+        });
+
+        // Settings can edit favourites for every market at once.  Keep this
+        // page's in-memory sets aligned so a later ★ click cannot overwrite
+        // those edits with stale state.
+        function adoptFavouriteChange(change) {
+            if (!change || change.mode !== mode) return;
+            state.favs[change.side] = new Set(favouriteIds(change.side, mode));
+            // Keep form drafts intact if favourites are edited from another
+            // tab (or from the settings overlay on this page).  State is
+            // already current and the next normal render will adopt it.
+            const hasDraft = [...root.querySelectorAll('input')]
+                .some((input) => !['checkbox', 'hidden', 'submit', 'button'].includes(input.type)
+                    && input.value !== '');
+            if (!state.busy && !hasDraft) render();
+        }
+        core.events.on('market:favouritesChanged', adoptFavouriteChange);
+        window.addEventListener('storage', (ev) => {
+            const change = favouriteStorageChange(ev.key);
+            if (change) adoptFavouriteChange(change);
         });
 
         // QoL: the open market is effectively watched while it's on screen.
