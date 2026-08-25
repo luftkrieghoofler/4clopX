@@ -684,7 +684,7 @@ export const liveUpdatesModule = {
         }
 
         const cdText = el('span', { class: 'text-info' }, ['—']);
-        const cdLi = el('li', {}, [el('a', {
+        const cdLi = el('li', { class: 'clop-live-countdown' }, [el('a', {
             style: 'cursor: pointer;',
             title: 'Time until the next live update (messages, alliance, favourite markets). Click to update now.',
             onclick: () => requestPollNow(),
@@ -799,7 +799,34 @@ export const liveUpdatesModule = {
         }
 
         const navRight = document.querySelector('nav.navbar ul.navbar-right');
-        if (navRight) navRight.insertBefore(cdLi, navRight.firstElementChild);
+        let countdownHome = null;
+        if (navRight) {
+            // Keep a stable home position immediately after the timer.  A
+            // hidden <li> (rather than a comment) also makes controls added
+            // later at "firstElementChild" stay ahead of this home slot.
+            countdownHome = el('li', {
+                class: 'clop-live-countdown-home',
+                style: 'display:none;',
+                'aria-hidden': 'true',
+            });
+            navRight.insertBefore(cdLi, navRight.firstChild);
+            navRight.insertBefore(countdownHome, cdLi.nextSibling);
+        }
+        const placeCountdown = () => {
+            const shortcutHost = core.settings.get('shortcuts.timerInBar')
+                && core.shortcuts && core.shortcuts.toolHost
+                ? core.shortcuts.toolHost()
+                : null;
+            if (shortcutHost) {
+                if (cdLi.parentNode !== shortcutHost) shortcutHost.appendChild(cdLi);
+            } else if (countdownHome && countdownHome.parentNode) {
+                if (cdLi.nextSibling !== countdownHome) {
+                    countdownHome.parentNode.insertBefore(cdLi, countdownHome);
+                }
+            }
+        };
+        core.events.on('shortcuts:layoutChanged', placeCountdown);
+        placeCountdown();
 
         setInterval(() => {
             if (stopped) return;

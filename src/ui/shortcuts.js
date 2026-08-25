@@ -86,6 +86,16 @@ export const shortcutsModule = {
             onChange: () => core.events.emit('shortcuts:changed', {}),
         });
         core.settings.define({
+            key: 'shortcuts.timerInBar',
+            section: 'Shortcuts',
+            label: 'Put refresh timer in shortcut bar',
+            description: 'When shortcuts have been added, keep the click-to-refresh countdown at the left of the sticky bar. It remains in the main navbar while the bar is empty.',
+            type: 'bool',
+            default: true,
+            parent: 'shortcuts.visible',
+            onChange: () => core.events.emit('shortcuts:layoutChanged', {}),
+        });
+        core.settings.define({
             key: 'shortcuts.manage',
             section: 'Shortcuts',
             label: 'Manage shortcuts…',
@@ -110,11 +120,13 @@ export const shortcutsModule = {
         let popover = null;
         let popoverOutside = null;
         let manager = null;
+        let lastToolHostAvailable = null;
 
         core.addStyle(`
             nav.navbar.clop-shortcuts-visible { margin-bottom: 0; }
             #clop-shortcut-bar { position: sticky; top: 0; z-index: 990; margin-bottom: 20px; background: #f8f8f8; border-bottom: 1px solid #e7e7e7; box-shadow: 0 1px 2px rgba(0,0,0,.06); }
             #clop-shortcut-bar .clop-shortcut-row { min-height: 35px; display: flex; align-items: stretch; }
+            #clop-shortcut-bar .clop-shortcut-content { display: flex; align-items: stretch; min-width: 0; flex: 1; }
             #clop-shortcut-bar .clop-shortcut-links { display: flex; align-items: stretch; min-width: 0; overflow-x: auto; overflow-y: hidden; flex: 1; }
             #clop-shortcut-bar .clop-shortcut-link { display: flex; align-items: center; flex: 0 0 auto; padding: 7px 10px; color: #555; white-space: nowrap; text-decoration: none; border-right: 1px solid rgba(0,0,0,.07); }
             #clop-shortcut-bar .clop-shortcut-link:hover { color: #222; background: #eee; }
@@ -125,6 +137,11 @@ export const shortcutsModule = {
             #clop-shortcut-bar .clop-shortcut-empty-message { flex: 1; text-align: center; }
             #clop-shortcut-bar .clop-shortcut-empty-message .btn-link { padding: 0; color: #337ab7; vertical-align: baseline; }
             #clop-shortcut-bar .clop-shortcut-dismiss { flex: 0 0 auto; margin: 5px 0; }
+            #clop-shortcut-bar .clop-shortcut-tools { display: flex; align-items: stretch; flex: 0 0 auto; border-right: 1px solid rgba(0,0,0,.08); }
+            #clop-shortcut-bar .clop-shortcut-tools:empty { display: none !important; }
+            #clop-shortcut-bar .clop-live-countdown { display: flex; align-items: stretch; list-style: none; }
+            #clop-shortcut-bar .clop-live-countdown > a { display: flex; align-items: center; justify-content: center; box-sizing: border-box; width: 78px; padding: 7px 10px; color: #555; white-space: nowrap; text-decoration: none; font-variant-numeric: tabular-nums; font-feature-settings: "tnum"; }
+            #clop-shortcut-bar .clop-live-countdown > a:hover { color: #222; background: #eee; }
             .clop-save-shortcut > a { cursor: pointer; font-size: 16px; }
             .clop-save-shortcut.active > a { color: #f0ad4e !important; }
             .clop-shortcut-popover { position: fixed; z-index: 10020; width: 310px; max-width: calc(100vw - 20px); padding: 12px; background: #fff; border: 1px solid #ccc; border-radius: 4px; box-shadow: 0 5px 15px rgba(0,0,0,.25); }
@@ -156,7 +173,9 @@ export const shortcutsModule = {
         `);
 
         const navContainer = nav.querySelector(':scope > .container-fluid') ? 'container-fluid' : 'container';
-        const barRow = el('div', { class: 'clop-shortcut-row' });
+        const barContent = el('div', { class: 'clop-shortcut-content' });
+        const barTools = el('div', { class: 'clop-shortcut-tools', style: 'display:none;' });
+        const barRow = el('div', { class: 'clop-shortcut-row' }, [barTools, barContent]);
         const bar = el('div', { id: 'clop-shortcut-bar', style: 'display:none;' }, [
             el('div', { class: navContainer }, [barRow]),
         ]);
@@ -290,19 +309,28 @@ export const shortcutsModule = {
             const saved = items();
             const visible = core.settings.get('shortcuts.visible')
                 && (saved.length > 0 || !shortcutOnboardingDismissed());
+            const toolHostAvailable = visible && saved.length > 0;
             bar.style.display = visible ? '' : 'none';
+            barTools.style.display = toolHostAvailable ? '' : 'none';
             nav.classList.toggle('clop-shortcuts-visible', visible);
-            if (!visible) return;
+            if (toolHostAvailable !== lastToolHostAvailable) {
+                lastToolHostAvailable = toolHostAvailable;
+                core.events.emit('shortcuts:layoutChanged', {});
+            }
+            if (!visible) {
+                barContent.textContent = '';
+                return;
+            }
 
-            const oldScroll = barRow.querySelector('.clop-shortcut-links')?.scrollLeft || 0;
-            barRow.textContent = '';
+            const oldScroll = barContent.querySelector('.clop-shortcut-links')?.scrollLeft || 0;
+            barContent.textContent = '';
             if (!saved.length) {
                 const action = el('button', {
                     class: 'btn btn-link btn-xs',
                     type: 'button',
                     onclick: saveCurrentView,
                 }, ['click 🔖 in the main navigation to save this page']);
-                barRow.appendChild(el('div', { class: 'clop-shortcut-empty' }, [
+                barContent.appendChild(el('div', { class: 'clop-shortcut-empty' }, [
                     el('div', { class: 'clop-shortcut-empty-message' }, [
                         'No shortcuts yet — ', action, '.',
                     ]),
@@ -330,7 +358,7 @@ export const shortcutsModule = {
                 for (const badge of badges) anchor.appendChild(badge);
                 links.appendChild(anchor);
             }
-            barRow.appendChild(links);
+            barContent.appendChild(links);
             links.scrollLeft = oldScroll;
         }
 
@@ -699,6 +727,7 @@ export const shortcutsModule = {
             openManager,
             captureCurrent,
             items,
+            toolHost: () => (core.settings.get('shortcuts.visible') && items().length ? barTools : null),
         };
         if (items().length && !shortcutOnboardingDismissed()) dismissShortcutOnboarding();
         updateStickyTop();

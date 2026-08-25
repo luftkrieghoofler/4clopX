@@ -35,6 +35,8 @@ export const settingsModule = {
             .clop-settings-panel .panel-heading .close { line-height: 1; }
             .clop-setting { margin-bottom: 14px; }
             .clop-setting.checkbox { margin-top: 0; }
+            .clop-setting-child { margin-left: 20px; }
+            .clop-setting-child.clop-setting-disabled { opacity: .62; }
             .clop-setting small { display: block; margin-top: 2px; }
             .clop-setting-num { width: 90px; display: inline-block; margin-left: 8px; }
             .clop-setting-choice { display: inline-block; margin-top: 5px; }
@@ -62,11 +64,15 @@ export const settingsModule = {
 
         let overlay = null;
         const settingRefreshers = new Map();
+        const dependencyRefreshers = [];
         let marketEditor = null;
 
         core.events.on('settings:changed', ({ key, value }) => {
             const refresh = settingRefreshers.get(key);
             if (refresh) refresh(value);
+            for (const dependency of dependencyRefreshers) {
+                if (dependency.parent === key) dependency.refresh();
+            }
         });
         core.events.on('market:friendlyCache', () => {
             if (marketEditor) marketEditor.refreshWatches();
@@ -91,6 +97,7 @@ export const settingsModule = {
             overlay.remove();
             overlay = null;
             settingRefreshers.clear();
+            dependencyRefreshers.length = 0;
             if (marketEditor) marketEditor.destroy();
             marketEditor = null;
             document.removeEventListener('keydown', onKey);
@@ -99,6 +106,7 @@ export const settingsModule = {
         function openPanel() {
             if (overlay) return;
             settingRefreshers.clear();
+            dependencyRefreshers.length = 0;
             const body = el('div', { class: 'panel-body' });
             // Group by each definition's `section`, in first-seen order
             // (module registration order: Auto-login, Live updates, Market).
@@ -141,6 +149,19 @@ export const settingsModule = {
             ? [el('small', { class: 'text-muted' }, [def.description])]
             : []);
 
+        function withParent(def, row, controls) {
+            if (!def.parent) return row;
+            row.classList.add('clop-setting-child');
+            const refresh = () => {
+                const enabled = !!core.settings.get(def.parent);
+                row.classList.toggle('clop-setting-disabled', !enabled);
+                for (const control of controls) control.disabled = !enabled;
+            };
+            dependencyRefreshers.push({ parent: def.parent, refresh });
+            refresh();
+            return row;
+        }
+
         function settingRow(def) {
             if (def.type === 'bool') {
                 const cb = el('input', {
@@ -149,10 +170,10 @@ export const settingsModule = {
                 });
                 cb.checked = !!core.settings.get(def.key);
                 settingRefreshers.set(def.key, (value) => { cb.checked = !!value; });
-                return el('div', { class: 'checkbox clop-setting' }, [
+                return withParent(def, el('div', { class: 'checkbox clop-setting' }, [
                     el('label', {}, [cb, ` ${def.label}`, ...reloadNote(def)]),
                     ...description(def),
-                ]);
+                ]), [cb]);
             }
             if (def.type === 'number') {
                 const input = el('input', { class: 'form-control input-sm clop-setting-num', type: 'text' });
@@ -163,10 +184,10 @@ export const settingsModule = {
                     if (Number.isFinite(n)) changed(def, n);
                     else input.value = String(core.settings.get(def.key));  // reject garbage
                 });
-                return el('div', { class: 'clop-setting' }, [
+                return withParent(def, el('div', { class: 'clop-setting' }, [
                     el('label', {}, [def.label, input, ...reloadNote(def)]),
                     ...description(def),
-                ]);
+                ]), [input]);
             }
             if (def.type === 'choice') {
                 const buttons = new Map();
@@ -198,7 +219,7 @@ export const settingsModule = {
                     return button;
                 });
                 settingRefreshers.set(def.key, refresh);
-                return el('div', { class: 'clop-setting' }, [
+                return withParent(def, el('div', { class: 'clop-setting' }, [
                     el('div', {}, [def.label, ...reloadNote(def)]),
                     el('div', {
                         class: 'btn-group clop-setting-choice',
@@ -206,7 +227,7 @@ export const settingsModule = {
                         'aria-label': def.label,
                     }, choices),
                     ...description(def),
-                ]);
+                ]), [...buttons.values()]);
             }
             if (def.type === 'button') {
                 const btn = el('button', { class: 'btn btn-default btn-sm', type: 'button' }, [def.label]);
@@ -216,7 +237,8 @@ export const settingsModule = {
                             .then(() => def.handler && def.handler())
                             .catch((e) => console.error(`[4clopX] setting action "${def.key}" failed:`, e));
                     });
-                    return el('div', { class: 'clop-setting' }, [btn, ...description(def)]);
+                    return withParent(def,
+                        el('div', { class: 'clop-setting' }, [btn, ...description(def)]), [btn]);
                 }
                 btn.addEventListener('click', () => {
                     btn.disabled = true;
@@ -226,10 +248,11 @@ export const settingsModule = {
                         .catch((e) => { btn.textContent = `failed: ${e.message || e}`; })
                         .finally(() => setTimeout(() => {
                             btn.textContent = def.label;
-                            btn.disabled = false;
+                            btn.disabled = def.parent ? !core.settings.get(def.parent) : false;
                         }, 1500));
                 });
-                return el('div', { class: 'clop-setting' }, [btn, ...description(def)]);
+                return withParent(def,
+                    el('div', { class: 'clop-setting' }, [btn, ...description(def)]), [btn]);
             }
             console.warn(`[4clopX] setting "${def.key}" has unknown type "${def.type}"`);
             return el('div');

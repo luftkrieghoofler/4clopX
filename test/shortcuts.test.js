@@ -6,6 +6,7 @@ import {
     pageShortcutTarget, readShortcuts, shortcutHref, shortcutIdentity,
     shortcutOnboardingDismissed, shortcutStorageChange, writeShortcuts,
 } from '../src/lib/shortcuts.js';
+import { shortcutsModule } from '../src/ui/shortcuts.js';
 
 const previousStorage = globalThis.localStorage;
 const values = new Map();
@@ -59,4 +60,20 @@ test('tracks onboarding independently from the shortcut list', () => {
     assert.equal(shortcutStorageChange('clopx.shortcuts.items'), 'items');
     assert.equal(shortcutStorageChange('clopx.shortcuts.onboardingDismissed'), 'onboarding');
     assert.equal(shortcutStorageChange('clopx.market.favs.sell.resources'), null);
+});
+
+test('defines the timer placement as an enabled-by-default child setting', () => {
+    const definitions = [];
+    const events = [];
+    shortcutsModule.settings({
+        settings: { define: (definition) => definitions.push(definition) },
+        events: { emit: (type) => events.push(type) },
+    });
+
+    const timer = definitions.find((definition) => definition.key === 'shortcuts.timerInBar');
+    assert.equal(timer.type, 'bool');
+    assert.equal(timer.default, true);
+    assert.equal(timer.parent, 'shortcuts.visible');
+    timer.onChange();
+    assert.deepEqual(events, ['shortcuts:layoutChanged']);
 });
