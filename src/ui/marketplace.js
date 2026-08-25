@@ -25,6 +25,24 @@ const SIDES = [
 ];
 const DEFAULT_BUY_ORDER_PRICE = '1000';
 
+export function sellRevenueAfterTax(quantity, unitPrice, sellMultiplier) {
+    return Math.floor(unitPrice * quantity * sellMultiplier);
+}
+
+// Lowest whole-number unit price whose after-tax return meets the target.
+// The one-step adjustments guard the division against floating-point edges.
+export function unitPriceForSellRevenue(quantity, targetRevenue, sellMultiplier) {
+    if (!Number.isSafeInteger(quantity) || quantity < 1
+        || !Number.isSafeInteger(targetRevenue) || targetRevenue < 1
+        || !Number.isFinite(sellMultiplier) || sellMultiplier <= 0) return null;
+    let price = Math.max(1, Math.ceil(targetRevenue / (quantity * sellMultiplier)));
+    if (!Number.isSafeInteger(price)) return null;
+    if (sellRevenueAfterTax(quantity, price, sellMultiplier) < targetRevenue) price += 1;
+    if (!Number.isSafeInteger(price)) return null;
+    if (price > 1 && sellRevenueAfterTax(quantity, price - 1, sellMultiplier) >= targetRevenue) price -= 1;
+    return price;
+}
+
 export const marketplaceModule = {
     name: 'marketplace',
 
@@ -66,6 +84,7 @@ export const marketplaceModule = {
         const lastKey = (side) => `clopx.market.last.${side}.${mode || 'resources'}`;
         const SHOW_DNA_KEY = 'clopx.market.showDna';
         const FAVS_ONLY_KEY = 'clopx.market.favsOnly';
+        const SELL_PRICE_MODE_KEY = 'clopx.market.sellPriceMode';
 
         /* ---------------- state ---------------- */
 
@@ -81,6 +100,7 @@ export const marketplaceModule = {
             busy: false,
             showDna: core.storage.get(SHOW_DNA_KEY, '0') === '1',
             favsOnly: core.storage.get(FAVS_ONLY_KEY, '0') === '1',
+            sellPriceMode: core.storage.get(SELL_PRICE_MODE_KEY, 'each') === 'total' ? 'total' : 'each',
             favs: null,                            // {sell: Set, buyer: Set}, filled below
             upkeep: null,                          // resource stats from overview.php
             showHelp: false,
@@ -371,6 +391,9 @@ export const marketplaceModule = {
             #clop-market-root .clop-place .form-control { width: 110px; display: inline-block; }
             #clop-market-root .clop-place .clop-place-qty { width: 165px; display: inline-table; vertical-align: middle; }
             #clop-market-root .clop-place .clop-place-qty .form-control { width: 100%; }
+            #clop-market-root .clop-place .clop-price-mode { display: inline-block; vertical-align: middle; }
+            #clop-market-root .clop-place .clop-price-mode .btn { padding-left: 8px; padding-right: 8px; }
+            #clop-market-root .clop-place .clop-price-mode .btn.active { color: #fff; background: #5bc0de; border-color: #46b8da; box-shadow: none; text-shadow: none; }
             #clop-market-root td { vertical-align: middle !important; }
             #clop-market-root .clop-row-actions { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
             #clop-market-root .clop-row-actions form { margin: 0; display: flex; align-items: center; gap: 6px; }
@@ -697,21 +720,35 @@ export const marketplaceModule = {
         /* list / offer form for the active resource */
         function renderPlaceForm() {
             const sell = state.side === 'sell';
+            let pricingMode = sell ? state.sellPriceMode : 'each';
             const qty = el('input', { class: 'form-control', placeholder: 'Qty' });
             const price = el('input', {
                 class: 'form-control',
-                placeholder: sell ? 'Bits each' : `${DEFAULT_BUY_ORDER_PRICE} (default)`,
+                placeholder: sell
+                    ? (pricingMode === 'total' ? 'Desired bits' : 'Bits')
+                    : `${DEFAULT_BUY_ORDER_PRICE} (default)`,
             });
             const note = el('span', { class: 'text-muted' });
             let maxExpected = null;
 
+            const sellRevenue = (q, p) => sellRevenueAfterTax(q, p, state.mult.sell);
+            const unitPriceForTotal = (q, target) => unitPriceForSellRevenue(q, target, state.mult.sell);
+
             const updateNote = () => {
                 const priceValue = price.value.trim() || (sell ? '' : DEFAULT_BUY_ORDER_PRICE);
-                const q = parseInt(qty.value, 10), p = parseInt(priceValue, 10);
-                if (!(q > 0) || !(p > 0)) { note.textContent = ''; return; }
-                note.textContent = sell
-                    ? ` — ${core.commas(Math.floor(p * q * state.mult.sell))} bits if it all sells`
-                    : ` — costs ${core.commas(Math.floor(p * q * state.mult.buy))} bits now (refunded if you remove the offer)`;
+                const q = parseInt(qty.value, 10), entered = parseInt(priceValue, 10);
+                if (!(q > 0) || !(entered > 0)) { note.textContent = ''; return; }
+                if (!sell) {
+                    note.textContent = ` — costs ${core.commas(Math.floor(entered * q * state.mult.buy))} bits now ` +
+                        '(refunded if you remove the offer)';
+                    return;
+                }
+                const unitPrice = pricingMode === 'total' ? unitPriceForTotal(q, entered) : entered;
+                if (!unitPrice) { note.textContent = ''; return; }
+                const revenue = sellRevenue(q, unitPrice);
+                note.textContent = pricingMode === 'total'
+                    ? ` — lists at ${core.commas(unitPrice)} bits each → ${core.commas(revenue)} bits if all sell`
+                    : ` — ${core.commas(revenue)} bits if all sell`;
             };
             qty.addEventListener('input', () => {
                 maxExpected = null;
@@ -719,6 +756,62 @@ export const marketplaceModule = {
             });
             price.addEventListener('input', updateNote);
             const rememberMax = (expected) => { maxExpected = expected; };
+
+            let priceMode = null;
+            if (sell) {
+                const modeButtons = {};
+                const setPricingMode = (next) => {
+                    if (next === pricingMode) return;
+                    const previous = pricingMode;
+                    const qtyValue = qty.value.trim();
+                    const enteredValue = price.value.trim();
+                    const q = parseInt(qtyValue, 10);
+                    const entered = parseInt(enteredValue, 10);
+                    pricingMode = next;
+                    state.sellPriceMode = pricingMode;
+                    core.storage.set(SELL_PRICE_MODE_KEY, pricingMode);
+
+                    // Convert an existing valid value when switching modes
+                    // so the toggle does not discard work or silently
+                    // reinterpret the same number.
+                    if (/^\d+$/.test(qtyValue) && /^\d+$/.test(enteredValue) && q > 0 && entered > 0) {
+                        if (previous === 'each' && pricingMode === 'total') {
+                            price.value = String(sellRevenue(q, entered));
+                        } else if (previous === 'total' && pricingMode === 'each') {
+                            const unitPrice = unitPriceForTotal(q, entered);
+                            if (unitPrice) price.value = String(unitPrice);
+                        }
+                    }
+                    for (const [value, button] of Object.entries(modeButtons)) {
+                        const selected = value === pricingMode;
+                        button.classList.toggle('active', selected);
+                        button.setAttribute('aria-checked', selected ? 'true' : 'false');
+                    }
+                    price.setAttribute('placeholder', pricingMode === 'total' ? 'Desired bits' : 'Bits');
+                    updateNote();
+                };
+                const modeButton = (value, label) => {
+                    const selected = value === pricingMode;
+                    const button = el('button', {
+                        class: `btn btn-default${selected ? ' active' : ''}`,
+                        type: 'button',
+                        role: 'radio',
+                        'aria-checked': selected ? 'true' : 'false',
+                        onclick: () => setPricingMode(value),
+                    }, [label]);
+                    modeButtons[value] = button;
+                    return button;
+                };
+                priceMode = el('div', {
+                    class: 'btn-group clop-price-mode',
+                    role: 'radiogroup',
+                    'aria-label': 'Sell-price input mode',
+                    title: 'Enter either a per-item listing price or your desired total revenue after tax',
+                }, [
+                    modeButton('each', 'Bits each'),
+                    modeButton('total', 'Total after tax'),
+                ]);
+            }
 
             const qtyControl = sell
                 ? el('div', { class: 'input-group clop-place-qty' }, [
@@ -736,9 +829,23 @@ export const marketplaceModule = {
                 onsubmit: (ev) => {
                     ev.preventDefault();
                     const amountValue = qty.value.trim();
-                    const priceValue = price.value.trim() || (sell ? '' : DEFAULT_BUY_ORDER_PRICE);
-                    if (!/^\d+$/.test(amountValue) || !/^\d+$/.test(priceValue)) {
+                    const enteredPrice = price.value.trim() || (sell ? '' : DEFAULT_BUY_ORDER_PRICE);
+                    if (!/^\d+$/.test(amountValue) || !/^\d+$/.test(enteredPrice)) {
                         state.messages = { errors: ['Digits only- no commas, periods, or other markers.'], infos: [] };
+                        render();
+                        return;
+                    }
+                    let priceValue = enteredPrice;
+                    if (sell && pricingMode === 'total') {
+                        const calculatedPrice = unitPriceForTotal(Number(amountValue), Number(enteredPrice));
+                        if (!calculatedPrice) {
+                            state.messages = { errors: ['Quantity and desired total must be positive whole numbers within the supported range.'], infos: [] };
+                            render();
+                            return;
+                        }
+                        priceValue = String(calculatedPrice);
+                    } else if (!(Number(enteredPrice) > 0)) {
+                        state.messages = { errors: ['Quantity and price must both be greater than zero.'], infos: [] };
                         render();
                         return;
                     }
@@ -751,8 +858,9 @@ export const marketplaceModule = {
             }, [
                 sell ? 'Place ' : 'Offer to buy ',
                 qtyControl,
-                ` ${resourceName(state.activeId)} at `,
+                ` ${resourceName(state.activeId)} ${sell ? 'for ' : 'at '}`,
                 price,
+                ...(priceMode ? [' ', priceMode] : []),
                 ' ',
                 submit,
                 note,
