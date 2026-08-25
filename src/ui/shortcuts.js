@@ -124,24 +124,24 @@ export const shortcutsModule = {
 
         core.addStyle(`
             nav.navbar.clop-shortcuts-visible { margin-bottom: 0; }
-            #clop-shortcut-bar { position: sticky; top: 0; z-index: 990; margin-bottom: 20px; background: #f8f8f8; border-bottom: 1px solid #e7e7e7; box-shadow: 0 1px 2px rgba(0,0,0,.06); }
+            #clop-shortcut-bar { position: sticky; top: 0; z-index: 990; margin-bottom: 20px; color: var(--clop-shortcut-link-color, inherit); border-bottom: 1px solid transparent; box-shadow: 0 1px 2px rgba(0,0,0,.12); }
             #clop-shortcut-bar .clop-shortcut-row { min-height: 35px; display: flex; align-items: stretch; }
             #clop-shortcut-bar .clop-shortcut-content { display: flex; align-items: stretch; min-width: 0; flex: 1; }
             #clop-shortcut-bar .clop-shortcut-links { display: flex; align-items: stretch; min-width: 0; overflow-x: auto; overflow-y: hidden; flex: 1; }
-            #clop-shortcut-bar .clop-shortcut-link { display: flex; align-items: center; flex: 0 0 auto; padding: 7px 10px; color: #555; white-space: nowrap; text-decoration: none; border-right: 1px solid rgba(0,0,0,.07); }
-            #clop-shortcut-bar .clop-shortcut-link:hover { color: #222; background: #eee; }
+            #clop-shortcut-bar .clop-shortcut-link { display: flex; align-items: center; flex: 0 0 auto; padding: 7px 10px; color: var(--clop-shortcut-link-color, inherit); white-space: nowrap; text-decoration: none; border-right: 1px solid rgba(128,128,128,.28); }
+            #clop-shortcut-bar .clop-shortcut-link:hover { color: var(--clop-shortcut-link-color, inherit); background: rgba(128,128,128,.18); }
             #clop-shortcut-bar .clop-shortcut-link.active { color: #fff; background: #5bc0de; text-shadow: none; }
             #clop-shortcut-bar .clop-shortcut-link.active .clop-unavailable-market-badge { color: rgba(255,255,255,.85) !important; border-color: rgba(255,255,255,.75); }
             #clop-shortcut-bar .badge { margin-left: 5px; }
-            #clop-shortcut-bar .clop-shortcut-empty { display: flex; align-items: center; min-height: 35px; width: 100%; color: #777; }
+            #clop-shortcut-bar .clop-shortcut-empty { display: flex; align-items: center; min-height: 35px; width: 100%; color: var(--clop-shortcut-link-color, inherit); }
             #clop-shortcut-bar .clop-shortcut-empty-message { flex: 1; text-align: center; }
-            #clop-shortcut-bar .clop-shortcut-empty-message .btn-link { padding: 0; color: #337ab7; vertical-align: baseline; }
-            #clop-shortcut-bar .clop-shortcut-dismiss { flex: 0 0 auto; margin: 5px 0; }
-            #clop-shortcut-bar .clop-shortcut-tools { display: flex; align-items: stretch; flex: 0 0 auto; border-right: 1px solid rgba(0,0,0,.08); }
+            #clop-shortcut-bar .clop-shortcut-empty-message .btn-link { padding: 0; color: var(--clop-shortcut-link-color, inherit); vertical-align: baseline; text-decoration: underline; }
+            #clop-shortcut-bar .clop-shortcut-dismiss { flex: 0 0 auto; margin: 5px 0; color: var(--clop-shortcut-link-color, inherit); text-shadow: none; }
+            #clop-shortcut-bar .clop-shortcut-tools { display: flex; align-items: stretch; flex: 0 0 auto; border-right: 1px solid rgba(128,128,128,.28); }
             #clop-shortcut-bar .clop-shortcut-tools:empty { display: none !important; }
             #clop-shortcut-bar .clop-live-countdown { display: flex; align-items: stretch; list-style: none; }
-            #clop-shortcut-bar .clop-live-countdown > a { display: flex; align-items: center; justify-content: center; box-sizing: border-box; width: 78px; padding: 7px 10px; color: #555; white-space: nowrap; text-decoration: none; font-variant-numeric: tabular-nums; font-feature-settings: "tnum"; }
-            #clop-shortcut-bar .clop-live-countdown > a:hover { color: #222; background: #eee; }
+            #clop-shortcut-bar .clop-live-countdown > a { display: flex; align-items: center; justify-content: center; box-sizing: border-box; width: 78px; padding: 7px 10px; color: var(--clop-shortcut-link-color, inherit); white-space: nowrap; text-decoration: none; font-variant-numeric: tabular-nums; font-feature-settings: "tnum"; }
+            #clop-shortcut-bar .clop-live-countdown > a:hover { color: var(--clop-shortcut-link-color, inherit); background: rgba(128,128,128,.18); }
             .clop-save-shortcut > a { cursor: pointer; font-size: 16px; }
             .clop-save-shortcut.active > a { color: #f0ad4e !important; }
             .clop-shortcut-popover { position: fixed; z-index: 10020; width: 310px; max-width: calc(100vw - 20px); padding: 12px; background: #fff; border: 1px solid #ccc; border-radius: 4px; box-shadow: 0 5px 15px rgba(0,0,0,.25); }
@@ -180,6 +180,22 @@ export const shortcutsModule = {
             el('div', { class: navContainer }, [barRow]),
         ]);
         nav.insertAdjacentElement('afterend', bar);
+
+        function syncBarTheme() {
+            const navStyle = window.getComputedStyle(nav);
+            const sourceLink = [...nav.querySelectorAll('ul.navbar-nav > li > a')]
+                .find((anchor) => !anchor.parentElement.classList.contains('active'))
+                || nav.querySelector('ul.navbar-nav > li > a');
+            const linkStyle = sourceLink ? window.getComputedStyle(sourceLink) : navStyle;
+            bar.style.backgroundColor = navStyle.backgroundColor;
+            bar.style.backgroundImage = navStyle.backgroundImage;
+            bar.style.backgroundRepeat = navStyle.backgroundRepeat;
+            bar.style.backgroundPosition = navStyle.backgroundPosition;
+            bar.style.backgroundSize = navStyle.backgroundSize;
+            bar.style.borderBottomColor = navStyle.borderBottomColor;
+            bar.style.setProperty('--clop-shortcut-link-color', linkStyle.color || navStyle.color);
+        }
+        syncBarTheme();
 
         const saveAnchor = el('a', {
             href: '#',
