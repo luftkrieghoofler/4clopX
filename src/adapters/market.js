@@ -183,7 +183,7 @@ export function stockUiInsertionPoint(content) {
 // Orders from alliance mates (green) or friends (blue), per the server's
 // own styling; own orders excluded.  (Friend styling overrides alliance
 // styling server-side, which is why both count.)
-export function summarizeFriendly(orders) {
+export function summarizeFriendly(orders, actionable = true) {
     let amount = 0, count = 0;
     for (const o of orders) {
         if (!o.own && (o.relation === 'alliance' || o.relation === 'friend')) {
@@ -191,7 +191,13 @@ export function summarizeFriendly(orders) {
             count += 1;
         }
     }
-    return { amount, count };
+    return {
+        count: actionable ? count : 0,
+        amount: actionable ? amount : 0,
+        unavailableCount: actionable ? 0 : count,
+        unavailableAmount: actionable ? 0 : amount,
+        available: actionable,
+    };
 }
 
 /* ------------------------- the adapter ------------------------- */

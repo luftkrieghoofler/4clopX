@@ -15,7 +15,7 @@ import {
 import { fetchResourceStats } from '../adapters/overview.js';
 import {
     readFriendlyCache, friendlyTotals, writeFriendlyCacheEntry,
-    marketNotifyEnabled, forgetMarket,
+    marketNotifyEnabled, forgetMarket, UNAVAILABLE_SUMMARY_BADGES_KEY,
 } from './liveupdates.js';
 import { favouriteIds, writeFavourites, writeResourceOrder } from '../lib/favourites.js';
 
@@ -245,12 +245,22 @@ export const marketplaceModule = {
 
         // Record a watched market's friendly orders into the shared cache
         // from a fresh response, so filling an alliance order updates the
-        // blue badges, tab title, and other tabs immediately instead of at
+        // market badges, tab title, and other tabs immediately instead of at
         // the next sweep.  (Unwatched markets carry no badges, so there's
         // nothing to record.)
+        function marketIsActionable(side, resourceId) {
+            if (side !== 'buyer' || mode) return true;
+            const name = resourceName(resourceId).toLowerCase();
+            const upkeep = state.upkeep && state.upkeep.byName[name];
+            if (upkeep) return ownedAmount(resourceId) > upkeep.used + upkeep.mil;
+            const previous = readFriendlyCache()[`${mode || 'resources'}|${side}|${resourceId}`];
+            return previous && typeof previous.available === 'boolean' ? previous.available : true;
+        }
+
         function recordFriendly(side, resourceId, orders) {
             if (!marketNotifyEnabled(mode, side, resourceId)) return;
-            if (writeFriendlyCacheEntry(mode, side, resourceId, summarizeFriendly(orders), resourceName(resourceId))) {
+            const summary = summarizeFriendly(orders, marketIsActionable(side, resourceId));
+            if (writeFriendlyCacheEntry(mode, side, resourceId, summary, resourceName(resourceId))) {
                 core.events.emit('market:friendlyCache', {});
             }
         }
@@ -332,6 +342,7 @@ export const marketplaceModule = {
             upkeepFetching = true;
             try {
                 state.upkeep = await fetchResourceStats(core);
+                if (state.activeId) recordFriendly(state.side, state.activeId, state.orders);
                 updateMaxUi();
             } catch (e) {
                 console.warn('[4clopX] upkeep fetch failed:', e);
@@ -527,8 +538,7 @@ export const marketplaceModule = {
             /* side tabs: sell orders vs buy orders, with alliance-order totals */
             root.appendChild(el('ul', { class: 'nav nav-tabs clop-side-tabs' }, SIDES.map(({ side, label, hint }) => {
                 const a = el('a', { title: hint, onclick: () => switchSide(side) }, [label]);
-                const badge = sideTabBadge(side);
-                if (badge) a.appendChild(badge);
+                for (const badge of sideTabBadges(side)) a.appendChild(badge);
                 return el('li', {
                     class: state.side === side ? 'active clop-action' : 'clop-action',
                     'data-side': side,
@@ -586,8 +596,7 @@ export const marketplaceModule = {
                 const a = el('a', { onclick: () => load(r.id) }, [label]);
                 const mark = watchMarkFor(r.id);
                 if (mark) a.appendChild(mark);
-                const badge = badgeFor(r.id);
-                if (badge) a.appendChild(badge);
+                for (const badge of badgesFor(r.id)) a.appendChild(badge);
                 tabs.appendChild(el('li', {
                     class: r.id === state.activeId ? 'active clop-action' : 'clop-action',
                     'data-rid': r.id,
@@ -645,6 +654,9 @@ export const marketplaceModule = {
                 help.appendChild(el('span', {}, [
                     'Tab badges count the open orders of your alliance mates and friends (the green/blue names) ' +
                     'on this side of the market: 2(68) means two of them are trading 68 units in total. ' +
+                    'A filled badge is actionable; an outlined badge is a resource buy order you cannot fulfil ' +
+                    'because you have no stock above upkeep. Outlined orders stay visible for demand context, ' +
+                    'but do not count in the browser title or trigger notifications. ' +
                     'Badges appear on 👁 watched markets only — pick those in the ⚙ settings from your ★ ' +
                     'favourites (buy orders are watched by default). Watched markets refresh with every live ' +
                     'update, each costing one request per check, so watch sparingly. Everything else refreshes ' +
@@ -700,39 +712,59 @@ export const marketplaceModule = {
             }, ['👁']);
         }
 
-        // [orders (total)] alliance/friend badge for a tab, straight from
-        // the shared cache — which holds exactly the watched markets, so
-        // every badge shown contributes to the header/menu totals.
-        function badgeFor(id) {
+        // [orders (total)] alliance/friend badges for a tab, straight from
+        // the shared cache.  Filled means actionable; outlined means the
+        // player has no resource stock spare above upkeep.
+        function badgesFor(id) {
             const f = readFriendlyCache()[`${mode || 'resources'}|${state.side}|${id}`];
-            if (!f || !f.count) return null;
+            if (!f) return [];
             const what = state.side === 'sell' ? 'selling' : 'buying';
-            return el('span', {
-                class: 'badge clop-friendly-badge',
-                title: `${f.count} alliance/friend order${f.count === 1 ? '' : 's'} ${what} ${core.commas(f.amount)} total`,
-            }, [`${f.count} (${core.commas(f.amount)})`]);
+            const badges = [];
+            if (f.count) {
+                badges.push(el('span', {
+                    class: 'badge clop-friendly-badge clop-actionable-market-badge',
+                    title: `${f.count} actionable alliance/friend order${f.count === 1 ? '' : 's'} ` +
+                        `${what} ${core.commas(f.amount)} total`,
+                }, [`${f.count} (${core.commas(f.amount)})`]));
+            }
+            if (f.unavailableCount) {
+                badges.push(el('span', {
+                    class: 'badge clop-friendly-badge clop-unavailable-market-badge',
+                    title: `${f.unavailableCount} alliance/friend order${f.unavailableCount === 1 ? '' : 's'} ` +
+                        `${what} ${core.commas(f.unavailableAmount)} total; unavailable because you have no stock above upkeep`,
+                }, [`${f.unavailableCount} (${core.commas(f.unavailableAmount)})`]));
+            }
+            return badges;
         }
 
         // Alliance-order total across this side's watched favourites (with
         // the defaults, that's buy orders only — sell markets show up here
         // once watched via the settings panel).
-        function sideTabBadge(side) {
+        function sideTabBadges(side) {
             const t = friendlyTotals(mode, side);
-            if (!t.orders) return null;
-            return el('span', {
-                class: 'badge clop-menu-badge',
-                title: `${t.orders} alliance/friend order${t.orders === 1 ? '' : 's'} ` +
-                    `(${core.commas(t.amount)} units) across your favourite markets`,
-            }, [String(t.orders)]);
+            const badges = [];
+            if (t.orders) {
+                badges.push(el('span', {
+                    class: 'badge clop-menu-badge clop-actionable-market-badge',
+                    title: `${t.orders} actionable alliance/friend order${t.orders === 1 ? '' : 's'} ` +
+                        `(${core.commas(t.amount)} units) across your watched favourite markets`,
+                }, [String(t.orders)]));
+            }
+            if (core.settings.get(UNAVAILABLE_SUMMARY_BADGES_KEY) && t.unavailableOrders) {
+                badges.push(el('span', {
+                    class: 'badge clop-menu-badge clop-unavailable-market-badge',
+                    title: `${t.unavailableOrders} alliance/friend order${t.unavailableOrders === 1 ? '' : 's'} ` +
+                        `(${core.commas(t.unavailableAmount)} units) you cannot fulfil because you have no stock above upkeep`,
+                }, [String(t.unavailableOrders)]));
+            }
+            return badges;
         }
 
         function updateSideTabBadges() {
             for (const li of root.querySelectorAll('.clop-side-tabs li[data-side]')) {
                 const a = li.querySelector('a');
-                const old = a.querySelector('.clop-menu-badge');
-                if (old) old.remove();
-                const badge = sideTabBadge(li.getAttribute('data-side'));
-                if (badge) a.appendChild(badge);
+                for (const old of a.querySelectorAll('.clop-menu-badge')) old.remove();
+                for (const badge of sideTabBadges(li.getAttribute('data-side'))) a.appendChild(badge);
             }
         }
 
@@ -746,8 +778,7 @@ export const marketplaceModule = {
                 for (const old of a.querySelectorAll('.clop-watch-mark, .clop-friendly-badge')) old.remove();
                 const mark = watchMarkFor(id);
                 if (mark) a.appendChild(mark);
-                const badge = badgeFor(id);
-                if (badge) a.appendChild(badge);
+                for (const badge of badgesFor(id)) a.appendChild(badge);
             }
         }
 
@@ -793,7 +824,7 @@ export const marketplaceModule = {
                 type: 'button',
                 title: watched
                     ? 'Stop auto-refreshing this market with live updates'
-                    : 'Auto-refresh this market with live updates, count it in the blue badges, and notify on new alliance orders',
+                    : 'Auto-refresh this market with live updates, count it in the market badges, and notify on new actionable alliance orders',
                 onclick: () => {
                     core.marketNotify.set(mode, state.side, state.activeId, !watched);
                     render();

@@ -34,6 +34,9 @@ export const settingsModule = {
             .clop-setting-num { width: 90px; display: inline-block; margin-left: 8px; }
             .clop-setting-choice { display: inline-block; margin-top: 5px; }
             .clop-setting-choice .btn.active { color: #fff; background: #5bc0de; border-color: #46b8da; box-shadow: none; text-shadow: none; }
+            .clop-choice-example { margin-left: 4px; }
+            .clop-choice-example-blue { background: #5bc0de; color: #fff; }
+            .clop-choice-example-grey { background: #777; color: #fff; }
             .clop-setting-group { font-weight: bold; margin: 12px 0 4px 0; }
             .clop-section-heading { font-weight: bold; font-size: 15px; border-bottom: 1px solid rgba(128,128,128,.4); padding-bottom: 4px; margin: 20px 0 10px 0; }
             .clop-settings-panel .panel-body > .clop-section-heading:first-child { margin-top: 0; }
@@ -142,13 +145,19 @@ export const settingsModule = {
                 const current = core.settings.get(def.key);
                 const choices = (def.options || []).map((option) => {
                     const selected = option.value === current;
+                    const children = [option.label];
+                    if (option.example) {
+                        children.push(el('span', {
+                            class: `badge clop-choice-example ${option.example.class || ''}`,
+                        }, [String(option.example.text)]));
+                    }
                     const button = el('button', {
                         class: `btn btn-default btn-sm${selected ? ' active' : ''}`,
                         type: 'button',
                         role: 'radio',
                         'aria-checked': selected ? 'true' : 'false',
                         onclick: () => select(option.value),
-                    }, [option.label]);
+                    }, children);
                     buttons.set(option.value, button);
                     return button;
                 });
@@ -240,7 +249,8 @@ export const settingsModule = {
                 el('div', { class: 'clop-section-heading' }, ['Watched favourite markets']),
                 el('small', { class: 'text-muted' }, [
                     'Watched markets are checked for alliance/friend orders on every live update, count toward the ' +
-                    'blue badges and the tab title, and can raise notifications. Other markets refresh only when ' +
+                    'market badges and the tab title, and can raise notifications. Resource orders you cannot fulfil ' +
+                    'are shown as outlined resource-tab badges but are omitted from the title and notifications. Other markets refresh only when ' +
                     'you open their tab.',
                 ]),
                 ...(blocks.length ? blocks

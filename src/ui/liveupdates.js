@@ -36,6 +36,7 @@
 import { marketAdapter, marketPageUrl, summarizeFriendly } from '../adapters/market.js';
 import { headerBadges, applyHeaderBadges, HEADER_PROBE_PAGE } from '../adapters/header.js';
 import { isLoggedInDoc, login, CRED_KEY } from '../adapters/session.js';
+import { fetchResourceStats } from '../adapters/overview.js';
 import { readFavourites } from '../lib/favourites.js';
 
 // Header badges that raise desktop notifications.  Polls are deliberately
@@ -54,6 +55,7 @@ const NOTIFY_BADGES = {
 const TITLE_BADGES = Object.keys(NOTIFY_BADGES);
 
 const MODES = ['', 'weapons', 'armor'];
+export const UNAVAILABLE_SUMMARY_BADGES_KEY = 'market.showUnavailableSummaryBadges';
 const K = {
     leader: 'clopx.live.leader',
     nextAt: 'clopx.live.nextAt',
@@ -92,10 +94,18 @@ export function writeFriendlyCacheEntry(mode, side, resourceId, summary, name) {
     const cache = readFriendlyCache();
     const key = `${mode || 'resources'}|${side}|${resourceId}`;
     const prev = cache[key];
-    if (prev && prev.count === summary.count && prev.amount === summary.amount) return false;
+    const unavailableCount = summary.unavailableCount || 0;
+    const unavailableAmount = summary.unavailableAmount || 0;
+    if (prev && prev.count === summary.count && prev.amount === summary.amount
+        && (prev.unavailableCount || 0) === unavailableCount
+        && (prev.unavailableAmount || 0) === unavailableAmount
+        && prev.available === summary.available) return false;
     cache[key] = {
         count: summary.count,
         amount: summary.amount,
+        unavailableCount,
+        unavailableAmount,
+        available: summary.available,
         name: name || (prev ? prev.name : `resource ${resourceId}`),
         at: Date.now(),
     };
@@ -103,25 +113,49 @@ export function writeFriendlyCacheEntry(mode, side, resourceId, summary, name) {
     return true;
 }
 
-// The cache holds exactly the WATCHED markets, so every total is a plain
-// sum over it — the tab badges, side-tab totals, menu badges, and tab
-// title all agree by construction.
+// The cache holds exactly the WATCHED markets.  Actionable and unavailable
+// totals travel together for badges; notifications and the tab title use
+// only the actionable channel.
 
 // Totals for one mode+side.
 export function friendlyTotals(mode, side) {
     const prefix = `${mode || 'resources'}|${side}|`;
-    let orders = 0, amount = 0;
+    let orders = 0, amount = 0, unavailableOrders = 0, unavailableAmount = 0;
     for (const [key, v] of Object.entries(readFriendlyCache())) {
-        if (key.startsWith(prefix)) { orders += v.count; amount += v.amount; }
+        if (key.startsWith(prefix)) {
+            orders += v.count;
+            amount += v.amount;
+            unavailableOrders += v.unavailableCount || 0;
+            unavailableAmount += v.unavailableAmount || 0;
+        }
     }
-    return { orders, amount };
+    return { orders, amount, unavailableOrders, unavailableAmount };
 }
 
-// Grand total across all watched markets.
-export function watchedOrderTotal() {
-    let total = 0;
-    for (const v of Object.values(readFriendlyCache())) total += v.count;
-    return total;
+// Grand totals across all watched markets.
+export function watchedOrderTotals() {
+    let orders = 0, unavailableOrders = 0;
+    for (const v of Object.values(readFriendlyCache())) {
+        orders += v.count;
+        unavailableOrders += v.unavailableCount || 0;
+    }
+    return { orders, unavailableOrders };
+}
+
+export const watchedOrderTotal = () => watchedOrderTotals().orders;
+
+export function buyerResourceHasSpare(stats, resourceName, fallback = true) {
+    if (!stats || !resourceName) return fallback;
+    const resource = stats.byName && stats.byName[String(resourceName).toLowerCase()];
+    if (!resource) return fallback;
+    return resource.qty > resource.used + resource.mil;
+}
+
+function targetIsActionable(target, snap, stats, previous) {
+    if (target.side !== 'buyer' || target.mode) return true;
+    const resource = snap.resources.find((r) => r.id === target.resourceId);
+    const fallback = previous && typeof previous.available === 'boolean' ? previous.available : true;
+    return buyerResourceHasSpare(stats, resource && resource.name, fallback);
 }
 
 // Per-favourite-market watch flags: a watched market is swept on every poll
@@ -210,7 +244,7 @@ export const liveUpdatesModule = {
             key: 'live.notify',
             section: 'Live updates',
             label: 'Desktop notifications while no tab is focused',
-            description: 'Notify about new messages, alliance messages, deals, incoming attacks, and alliance orders in favourite markets.',
+            description: 'Notify about new messages, alliance messages, deals, incoming attacks, and actionable alliance orders in favourite markets.',
             type: 'bool',
             default: true,
             // The settings-UI click is a user gesture, which is exactly
@@ -225,7 +259,7 @@ export const liveUpdatesModule = {
             key: 'live.titleMarket',
             section: 'Market',
             label: 'Market overview in the tab title',
-            description: 'Show the watched-market buy-order total as "(Mkt: N)" in the browser tab title. The [N] notifications marker is unaffected.',
+            description: 'Show the actionable watched-market order total as "(Mkt: N)" in the browser tab title. Outlined unavailable orders and the [N] notifications marker are unaffected.',
             type: 'bool',
             default: true,
             // Nudge the title to re-render right away.
@@ -233,12 +267,25 @@ export const liveUpdatesModule = {
         });
         core.settings.define({
             key: 'market.blueBadges',
-            label: 'Blue market-order badges',
-            description: 'Show the alliance-order badges in blue, distinct from the stock notification badges; turn off to match the stock style.',
+            label: 'Market-order badges',
+            description: 'Choose the filled badge colour for actionable alliance/friend orders. Outlined badges always mean orders you cannot currently fulfil.',
+            type: 'choice',
+            options: [
+                { value: '1', label: 'Blue', example: { text: '3', class: 'clop-choice-example-blue' } },
+                { value: '0', label: 'Grey', example: { text: '3', class: 'clop-choice-example-grey' } },
+            ],
+            default: '1',
+            section: 'Market',
+            onChange: (value) => document.body.classList.toggle('clop-blue-badges', value === '1'),
+        });
+        core.settings.define({
+            key: UNAVAILABLE_SUMMARY_BADGES_KEY,
+            label: 'Show outlined unavailable-order summary badges',
+            description: 'Show outlined counts in the main menu and Sell Orders/Buy Orders tabs. Individual resource tabs always show them.',
             type: 'bool',
             default: true,
             section: 'Market',
-            onChange: (on) => document.body.classList.toggle('clop-blue-badges', on),
+            onChange: () => core.events.emit('market:friendlyCache', {}),
         });
     },
 
@@ -269,42 +316,64 @@ export const liveUpdatesModule = {
 
         core.addStyle(`
             .clop-menu-badge { margin-left: 5px; }
-            body.clop-blue-badges .clop-menu-badge { background-color: #5bc0de; color: #fff; }
+            .clop-actionable-market-badge { background-color: #777 !important; color: #fff !important; text-shadow: none; }
+            body.clop-blue-badges .clop-actionable-market-badge { background-color: #5bc0de !important; color: #fff !important; }
+            .clop-unavailable-market-badge { background: transparent !important; color: #999 !important; border: 1px solid #aaa; box-shadow: none; text-shadow: none; }
+            #clop-market-root .clop-tabs > li.active > a > .clop-unavailable-market-badge { color: rgba(255,255,255,.85) !important; border-color: rgba(255,255,255,.75); }
         `);
-        document.body.classList.toggle('clop-blue-badges', core.settings.get('market.blueBadges'));
+        document.body.classList.toggle('clop-blue-badges', core.settings.get('market.blueBadges') === '1');
 
         /* ---------------- alliance-order menu badges ---------------- */
 
-        function setMenuBadge(a, count) {
-            let b = a.querySelector(':scope > .clop-menu-badge');
+        function setMenuBadge(a, count, kind, title) {
+            const kindClass = kind === 'actionable'
+                ? 'clop-actionable-market-badge'
+                : 'clop-unavailable-market-badge';
+            let b = a.querySelector(`:scope > .clop-menu-badge.${kindClass}`);
             if (!count) {
                 if (b) b.remove();
                 return;
             }
             if (!b) {
                 b = el('span', {
-                    class: 'badge clop-menu-badge',
-                    title: 'Alliance/friend orders in watched favourite markets',
+                    class: `badge clop-menu-badge ${kindClass}`,
                 });
                 a.insertBefore(b, a.querySelector(':scope > b.caret'));
             }
             b.textContent = String(count);
+            b.title = title;
         }
 
-        // The blue badges count watched markets only (defaults: buy-order
+        function setMenuBadges(a, totals) {
+            setMenuBadge(a, totals.orders, 'actionable',
+                'Actionable alliance/friend orders in watched favourite markets');
+            const unavailable = core.settings.get(UNAVAILABLE_SUMMARY_BADGES_KEY)
+                ? totals.unavailableOrders
+                : 0;
+            setMenuBadge(a, unavailable, 'unavailable',
+                'Alliance/friend orders you cannot fulfil because you have no stock above upkeep');
+            const caret = a.querySelector(':scope > b.caret');
+            for (const cls of ['clop-actionable-market-badge', 'clop-unavailable-market-badge']) {
+                const badge = a.querySelector(`:scope > .clop-menu-badge.${cls}`);
+                if (badge) a.insertBefore(badge, caret);
+            }
+        }
+
+        // Market badges count watched markets only (defaults: buy-order
         // favourites watched, sell-order favourites not — see the settings
-        // panel's watched-markets section).
+        // panel's watched-markets section).  Filled and outlined counts are
+        // deliberately kept as adjacent, separate badges.
         function updateMenuBadges() {
             for (const a of document.querySelectorAll(
                 'nav.navbar a[href^="marketplace.php"], nav.navbar a[href^="buyermarketplace.php"]')) {
                 const url = new URL(a.getAttribute('href'), location.href);
                 const mode = url.searchParams.get('mode') || '';
                 const side = url.pathname.includes('buyermarketplace') ? 'buyer' : 'sell';
-                setMenuBadge(a, friendlyTotals(mode, side).orders);
+                setMenuBadges(a, friendlyTotals(mode, side));
             }
             const cap = [...document.querySelectorAll('nav.navbar a.dropdown-toggle')]
                 .find((a) => (a.textContent || '').trim().startsWith('Capitalism'));
-            if (cap) setMenuBadge(cap, watchedOrderTotal());
+            if (cap) setMenuBadges(cap, watchedOrderTotals());
             updateTitle();
         }
 
@@ -314,8 +383,8 @@ export const liveUpdatesModule = {
          * incoming attacks; not polls] — a count of things to go check,
          * not a sum of items (magnitudes across categories aren't
          * comparable) — shown only when nonzero so a bracket at a glance
-         * means news; and the watched-market buy-order total (same number
-         * as the blue Capitalism badge), always shown. */
+         * means news; and the actionable watched-market order total (same
+         * number as the filled Capitalism badge), always shown. */
 
         const baseTitle = document.title;
         function updateTitle() {
@@ -435,6 +504,19 @@ export const liveUpdatesModule = {
                 targets.push({ mode: v.mode, side: v.side, resourceId: v.resourceId, cacheable: false });
             }
 
+            let resourceStats = null;
+            if (targets.some((t) => t.cacheable && !t.mode && t.side === 'buyer')) {
+                try {
+                    // One Overview request classifies every watched resource
+                    // buy market for this sweep; never fetch once per market.
+                    resourceStats = await fetchResourceStats(core);
+                } catch (e) {
+                    // Keep each market's previous classification.  New entries
+                    // fail open as actionable rather than hiding opportunities.
+                    console.warn('[4clopX] resource availability refresh failed:', e);
+                }
+            }
+
             for (const t of targets) {
                 const key = `${t.mode || 'resources'}|${t.side}|${t.resourceId}`;
                 if (viewIsFresh(t.mode, t.side, t.resourceId)) {
@@ -451,7 +533,8 @@ export const liveUpdatesModule = {
                     console.warn('[4clopX] open-market refresh failed:', e);
                     continue;
                 }
-                const summary = summarizeFriendly(snap.orders);
+                const summary = summarizeFriendly(snap.orders,
+                    targetIsActionable(t, snap, resourceStats, prev[key]));
                 // snap rides along so a marketplace view of this market in
                 // THIS tab can adopt the full data instead of re-fetching it
                 // (cross-tab only summaries travel, via the cache).
@@ -627,7 +710,19 @@ export const liveUpdatesModule = {
             try {
                 const snap = await marketAdapter(core, side, mode).load(resourceId);
                 if (!marketNotifyEnabled(mode, side, resourceId)) return;   // toggled off meanwhile
-                const summary = summarizeFriendly(snap.orders);
+                const key = `${mode || 'resources'}|${side}|${resourceId}`;
+                const previous = readFriendlyCache()[key];
+                let resourceStats = null;
+                if (!mode && side === 'buyer') {
+                    try {
+                        resourceStats = await fetchResourceStats(core);
+                    } catch (e) {
+                        console.warn('[4clopX] resource availability seed failed:', e);
+                    }
+                }
+                const target = { mode, side, resourceId };
+                const summary = summarizeFriendly(snap.orders,
+                    targetIsActionable(target, snap, resourceStats, previous));
                 const res = snap.resources.find((r) => r.id === resourceId);
                 if (writeFriendlyCacheEntry(mode, side, resourceId, summary, res && res.name)) {
                     core.events.emit('market:friendlyCache', {});
@@ -670,6 +765,9 @@ export const liveUpdatesModule = {
             } else if (ev.key === K.friendly) {
                 // Badge data lives in the cache itself; consumers just
                 // recompute from it.
+                core.events.emit('market:friendlyCache', {});
+            } else if (ev.key === `clopx.setting.${UNAVAILABLE_SUMMARY_BADGES_KEY}`) {
+                // Keep aggregate ghost badges in sync across open tabs.
                 core.events.emit('market:friendlyCache', {});
             } else if (ev.key === NOTIFY_KEY) {
                 // Watch flags changed in another tab: refresh flag-dependent

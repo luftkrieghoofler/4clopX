@@ -114,7 +114,7 @@ export const core = {
         //                          //   sections appear in first-seen order
         //   type: 'bool' | 'number' | 'choice' | 'button',
         //   default,               // bool/number/choice
-        //   options,               // choice: [{value, label}]
+        //   options,               // choice: [{value, label, example?}]
         //   handler,               // button: invoked by the settings UI
         //   onChange,              // optional: called by the settings UI
         //                          //   with the new value after set()
