@@ -23,6 +23,7 @@ const SIDES = [
     { side: 'sell', label: 'Sell Orders', hint: 'Listings from sellers — buy from them here.' },
     { side: 'buyer', label: 'Buy Orders', hint: 'Standing offers from buyers — sell to them here.' },
 ];
+const DEFAULT_BUY_ORDER_PRICE = '1000';
 
 export const marketplaceModule = {
     name: 'marketplace',
@@ -34,8 +35,8 @@ export const marketplaceModule = {
     settings(core) {
         core.settings.define({
             key: 'market.sellMaxNegativeNetConfirm',
-            label: 'Confirm "Sell Max" when net production is negative',
-            description: 'Ask for confirmation before Sell Max empties a stockpile whose per-tick net production is negative (i.e. one you are draining every tick).',
+            label: 'Confirm Max sales when net production is negative',
+            description: 'Ask for confirmation before Sell Max, or a Max-sized sell listing, empties a stockpile whose per-tick net production is negative (i.e. one you are draining every tick).',
             type: 'bool',
             default: true,
             section: 'Market',
@@ -250,11 +251,10 @@ export const marketplaceModule = {
                 .then(() => core.events.emit('live:pollNow', {}));
         };
 
-        /* ---------------- upkeep (Sell Max) ----------------
+        /* ---------------- upkeep (Sell Max / Max listing) ----------------
          * "Used" per tick from the Overview Resources table, fetched once
-         * when the buy-orders side first becomes active (resources mode
-         * only — weapons/armor have no upkeep) and re-verified on every
-         * Sell Max click. */
+         * when either resources market side becomes active (weapons/armor
+         * have no upkeep) and re-verified before every Max-sized sale. */
 
         const upkeepFor = (resourceId) => (state.upkeep
             ? state.upkeep.byName[resourceName(resourceId).toLowerCase()] || null
@@ -275,7 +275,7 @@ export const marketplaceModule = {
             upkeepFetching = true;
             try {
                 state.upkeep = await fetchResourceStats(core);
-                updateSellMaxUi();
+                updateMaxUi();
             } catch (e) {
                 console.warn('[4clopX] upkeep fetch failed:', e);
             } finally {
@@ -284,44 +284,54 @@ export const marketplaceModule = {
         }
 
         // Re-fetch the Overview and abort unless upkeep AND the resulting
-        // sale amount still match what the button promised (protects against
-        // building changes or stock movements in another tab).
+        // Max amount still match what the UI promised (protects against
+        // building changes or stock movements in another tab).  Returns
+        // "cancelled" separately so the listing form can retain its inputs.
+        async function verifyResourceMax(resourceId, expected, wording) {
+            const name = resourceName(resourceId);
+            const stats = await fetchResourceStats(core);
+            state.upkeep = stats;
+            const fresh = stats.byName[name.toLowerCase()];
+            const freshReserve = fresh ? reserveOf(fresh) : null;
+            if (!fresh || freshReserve !== expected.reserve) {
+                state.messages = {
+                    errors: [`${wording.notDone}: the upkeep of ${name} changed — used to be ${core.commas(expected.reserve)}, ` +
+                        `now it's ${fresh ? `${core.commas(freshReserve)} (${reserveText(fresh)})` : 'unknown'}. ` +
+                        'Check the numbers and try again if you\'re happy.'],
+                    infos: [],
+                };
+                return 'changed';
+            }
+            const freshSpare = Math.max(0, fresh.qty - freshReserve);
+            const freshMax = expected.cap == null ? freshSpare : Math.min(freshSpare, expected.cap);
+            if (freshMax !== expected.n) {
+                state.messages = {
+                    errors: [`${wording.notDone}: your ${name} stock changed — ${wording.maxLabel} would now ${wording.verb} ` +
+                        `${core.commas(freshMax)} instead of ${core.commas(expected.n)}. ` +
+                        'Check the numbers and try again if you\'re happy.'],
+                    infos: [],
+                };
+                return 'changed';
+            }
+            if (fresh.net < 0 && core.settings.get('market.sellMaxNegativeNetConfirm')) {
+                const ok = window.confirm(
+                    `Your net ${name} production is NEGATIVE (${core.commas(fresh.net)}/tick) — ` +
+                    'you are draining this stockpile every tick.\n\n' +
+                    `${wording.confirmVerb} ${core.commas(expected.n)} anyway?`);
+                if (!ok) return 'cancelled';
+            }
+            return 'ok';
+        }
+
         async function sellMax(order, expected, btn) {
             if (state.busy) return;
             setBusy(true);
             btn.textContent = '⟳ Verifying upkeep…';
-            const name = resourceName(order.resourceId);
             try {
-                const stats = await fetchResourceStats(core);
-                state.upkeep = stats;
-                const fresh = stats.byName[name.toLowerCase()];
-                const freshReserve = fresh ? reserveOf(fresh) : null;
-                if (!fresh || freshReserve !== expected.reserve) {
-                    state.messages = {
-                        errors: [`Not sold: the upkeep of ${name} changed — used to be ${core.commas(expected.reserve)}, ` +
-                            `now it's ${fresh ? `${core.commas(freshReserve)} (${reserveText(fresh)})` : 'unknown'}. ` +
-                            'Check the numbers and try again if you\'re happy.'],
-                        infos: [],
-                    };
-                    return;
-                }
-                const freshMax = Math.min(fresh.qty - freshReserve, order.amount);
-                if (freshMax !== expected.n) {
-                    state.messages = {
-                        errors: [`Not sold: your ${name} stock changed — Sell Max would now sell ` +
-                            `${core.commas(Math.max(0, freshMax))} instead of ${core.commas(expected.n)}. ` +
-                            'Check the numbers and try again if you\'re happy.'],
-                        infos: [],
-                    };
-                    return;
-                }
-                if (fresh.net < 0 && core.settings.get('market.sellMaxNegativeNetConfirm')) {
-                    const ok = window.confirm(
-                        `Your net ${name} production is NEGATIVE (${core.commas(fresh.net)}/tick) — ` +
-                        'you are draining this stockpile every tick.\n\n' +
-                        `Sell ${core.commas(expected.n)} anyway?`);
-                    if (!ok) return;
-                }
+                const verified = await verifyResourceMax(order.resourceId, expected, {
+                    notDone: 'Not sold', maxLabel: 'Sell Max', verb: 'sell', confirmVerb: 'Sell',
+                });
+                if (verified !== 'ok') return;
                 merge(await adapter().takeOrder(order, String(expected.n)));
             } catch (e) {
                 state.messages = { errors: [String(e.message || e)], infos: [] };
@@ -344,7 +354,7 @@ export const marketplaceModule = {
             // Keep the URL aligned with the stock page for this side.
             try { history.replaceState(null, '', marketPageUrl(side, mode)); } catch (e) { /* ignore */ }
             render();
-            if (side === 'buyer') maybeFetchUpkeep();
+            maybeFetchUpkeep();
             loadAndPoll(state.activeId);
         }
 
@@ -359,6 +369,8 @@ export const marketplaceModule = {
             #clop-market-root .clop-toolbar .clop-spacer { flex: 1; }
             #clop-market-root .clop-place { margin: 8px 0 12px 0; }
             #clop-market-root .clop-place .form-control { width: 110px; display: inline-block; }
+            #clop-market-root .clop-place .clop-place-qty { width: 165px; display: inline-table; vertical-align: middle; }
+            #clop-market-root .clop-place .clop-place-qty .form-control { width: 100%; }
             #clop-market-root td { vertical-align: middle !important; }
             #clop-market-root .clop-row-actions { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
             #clop-market-root .clop-row-actions form { margin: 0; display: flex; align-items: center; gap: 6px; }
@@ -686,41 +698,135 @@ export const marketplaceModule = {
         function renderPlaceForm() {
             const sell = state.side === 'sell';
             const qty = el('input', { class: 'form-control', placeholder: 'Qty' });
-            const price = el('input', { class: 'form-control', placeholder: 'Bits each' });
+            const price = el('input', {
+                class: 'form-control',
+                placeholder: sell ? 'Bits each' : `${DEFAULT_BUY_ORDER_PRICE} (default)`,
+            });
             const note = el('span', { class: 'text-muted' });
+            let maxExpected = null;
 
             const updateNote = () => {
-                const q = parseInt(qty.value, 10), p = parseInt(price.value, 10);
+                const priceValue = price.value.trim() || (sell ? '' : DEFAULT_BUY_ORDER_PRICE);
+                const q = parseInt(qty.value, 10), p = parseInt(priceValue, 10);
                 if (!(q > 0) || !(p > 0)) { note.textContent = ''; return; }
                 note.textContent = sell
                     ? ` — ${core.commas(Math.floor(p * q * state.mult.sell))} bits if it all sells`
                     : ` — costs ${core.commas(Math.floor(p * q * state.mult.buy))} bits now (refunded if you remove the offer)`;
             };
-            qty.addEventListener('input', updateNote);
+            qty.addEventListener('input', () => {
+                maxExpected = null;
+                updateNote();
+            });
             price.addEventListener('input', updateNote);
+            const rememberMax = (expected) => { maxExpected = expected; };
 
-            return el('form', {
+            const qtyControl = sell
+                ? el('div', { class: 'input-group clop-place-qty' }, [
+                    qty,
+                    el('span', { class: 'input-group-btn' }, [placeMaxButton(qty, updateNote, rememberMax)]),
+                ])
+                : qty;
+
+            const submit = el('button', { class: `btn ${sell ? 'btn-success' : 'btn-info'}`, type: 'submit' }, [
+                sell ? 'Place on Market' : 'Offer to Buy',
+            ]);
+
+            const form = el('form', {
                 class: 'form-inline clop-place clop-action',
                 onsubmit: (ev) => {
                     ev.preventDefault();
-                    if (!/^\d+$/.test(qty.value.trim()) || !/^\d+$/.test(price.value.trim())) {
+                    const amountValue = qty.value.trim();
+                    const priceValue = price.value.trim() || (sell ? '' : DEFAULT_BUY_ORDER_PRICE);
+                    if (!/^\d+$/.test(amountValue) || !/^\d+$/.test(priceValue)) {
                         state.messages = { errors: ['Digits only- no commas, periods, or other markers.'], infos: [] };
                         render();
                         return;
                     }
-                    run(() => adapter().createOrder(state.activeId, qty.value.trim(), price.value.trim()));
+                    if (sell && maxExpected && Number(amountValue) === maxExpected.n) {
+                        placeMaxListing(state.activeId, maxExpected, amountValue, priceValue, submit);
+                        return;
+                    }
+                    run(() => adapter().createOrder(state.activeId, amountValue, priceValue));
                 },
             }, [
                 sell ? 'Place ' : 'Offer to buy ',
-                qty,
+                qtyControl,
                 ` ${resourceName(state.activeId)} at `,
                 price,
                 ' ',
-                el('button', { class: `btn ${sell ? 'btn-success' : 'btn-info'}`, type: 'submit' }, [
-                    sell ? 'Place on Market' : 'Offer to Buy',
-                ]),
+                submit,
                 note,
             ]);
+            if (sell) {
+                form.addEventListener('clop:updateMax', () => {
+                    const old = form.querySelector('.clop-place-max');
+                    if (old) old.replaceWith(placeMaxButton(qty, updateNote, rememberMax));
+                });
+            }
+            return form;
+        }
+
+        // The sell-listing Max button uses the same reserve as Sell Max on
+        // buy-order rows.  It only fills the input; the Overview is fetched
+        // again when the form is submitted before anything is listed.
+        function placeMaxButton(qty, updateNote, setExpected) {
+            const resourceId = state.activeId;
+            const have = ownedAmount(resourceId);
+            const btn = el('button', {
+                class: 'btn btn-default clop-place-max', type: 'button',
+            }, [bold('Max')]);
+            const fill = (n, expected) => {
+                qty.value = String(n);
+                setExpected(expected);
+                updateNote();
+            };
+
+            const up = mode ? null : upkeepFor(resourceId);
+            if (mode || (state.upkeep && !up)) {
+                btn.title = mode
+                    ? `Use all ${core.commas(have)} you have`
+                    : `Use all ${core.commas(have)} you have; no upkeep data was found for this resource`;
+                btn.addEventListener('click', () => fill(have, null));
+                return btn;
+            }
+            if (!up) {
+                btn.disabled = true;
+                btn.title = 'Checking your upkeep on the Overview page…';
+                return btn;
+            }
+
+            const reserve = reserveOf(up);
+            const spare = Math.max(0, have - reserve);
+            btn.disabled = spare < 1;
+            btn.title = spare < 1
+                ? `Nothing to spare: you have ${core.commas(have)} and keep ${core.commas(reserve)} back (${reserveText(up)})`
+                : `Use your ${core.commas(spare)} spare stock and keep ${core.commas(reserve)} back (${reserveText(up)})`;
+            btn.addEventListener('click', () => fill(spare, { reserve, n: spare }));
+            return btn;
+        }
+
+        async function placeMaxListing(resourceId, expected, amount, price, submit) {
+            if (state.busy) return;
+            setBusy(true);
+            submit.textContent = '⟳ Verifying upkeep…';
+            let keepForm = false;
+            try {
+                const verified = await verifyResourceMax(resourceId, expected, {
+                    notDone: 'Not listed', maxLabel: 'Max', verb: 'list', confirmVerb: 'List',
+                });
+                if (verified === 'cancelled') {
+                    keepForm = true;
+                    return;
+                }
+                if (verified !== 'ok') return;
+                merge(await adapter().createOrder(resourceId, amount, price));
+            } catch (e) {
+                state.messages = { errors: [String(e.message || e)], infos: [] };
+            } finally {
+                setBusy(false);
+                if (keepForm) submit.textContent = 'Place on Market';
+                else render();
+            }
         }
 
         function renderOrders() {
@@ -854,19 +960,24 @@ export const marketplaceModule = {
             ]);
             btn.title = `Fills only ${core.commas(spare)} of the ${core.commas(order.amount)} wanted — the rest of ` +
                 `your ${core.commas(have)} is your reserve (${reserveText(up)}); upkeep is re-verified before selling`;
-            btn.addEventListener('click', () => sellMax(order, { reserve, n: spare }, btn));
+            btn.addEventListener('click', () => sellMax(order, { reserve, n: spare, cap: order.amount }, btn));
             return btn;
         }
 
-        // Patch the sell button in place once upkeep data arrives — a full
-        // render here could wipe what the user is typing.
-        function updateSellMaxUi() {
-            if (state.side !== 'buyer' || mode) return;
-            for (const tr of root.querySelectorAll('tr[data-idx]')) {
-                const order = state.orders[Number(tr.getAttribute('data-idx'))];
-                if (!order || order.own) continue;
-                const old = tr.querySelector('.clop-sellbtn');
-                if (old) old.replaceWith(sellButton(order));
+        // Patch the row button or listing-form Max button in place once
+        // upkeep data arrives — a full render could wipe user input.
+        function updateMaxUi() {
+            if (!mode && state.side === 'buyer') {
+                for (const tr of root.querySelectorAll('tr[data-idx]')) {
+                    const order = state.orders[Number(tr.getAttribute('data-idx'))];
+                    if (!order || order.own) continue;
+                    const old = tr.querySelector('.clop-sellbtn');
+                    if (old) old.replaceWith(sellButton(order));
+                }
+            }
+            if (!mode && state.side === 'sell') {
+                const form = root.querySelector('.clop-place');
+                if (form) form.dispatchEvent(new Event('clop:updateMax'));
             }
         }
 
@@ -909,7 +1020,7 @@ export const marketplaceModule = {
 
         // Orders only come with POST responses, so a remembered resource has
         // nothing rendered yet — load it dynamically, then run a full poll.
-        if (state.side === 'buyer') maybeFetchUpkeep();
+        maybeFetchUpkeep();
         if (state.activeId && !state.updatedAt) loadAndPoll(state.activeId);
         else core.events.emit('live:pollNow', {});
     },
