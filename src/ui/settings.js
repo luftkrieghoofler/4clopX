@@ -3,7 +3,8 @@
 // setting registered in core.settings — checkboxes for bools, inputs for
 // numbers, segmented controls for choices, and buttons for actions.  Values save immediately on change;
 // definitions flagged `reload: true` are marked as taking effect after a
-// page reload, and `onChange` hooks let modules react to edits live.
+// page reload, and core-dispatched `onChange` hooks let modules react to
+// edits live in every open tab.
 //
 // The panel is rendered purely from the registry, so any module's
 // core.settings.define() shows up here automatically.
@@ -49,6 +50,16 @@ export const settingsModule = {
         `);
 
         let overlay = null;
+        const settingRefreshers = new Map();
+        const watchedMarketRefreshers = [];
+
+        core.events.on('settings:changed', ({ key, value }) => {
+            const refresh = settingRefreshers.get(key);
+            if (refresh) refresh(value);
+        });
+        core.events.on('market:friendlyCache', () => {
+            for (const refresh of watchedMarketRefreshers) refresh();
+        });
 
         function onKey(ev) {
             if (ev.key === 'Escape') closePanel();
@@ -58,11 +69,15 @@ export const settingsModule = {
             if (!overlay) return;
             overlay.remove();
             overlay = null;
+            settingRefreshers.clear();
+            watchedMarketRefreshers.length = 0;
             document.removeEventListener('keydown', onKey);
         }
 
         function openPanel() {
             if (overlay) return;
+            settingRefreshers.clear();
+            watchedMarketRefreshers.length = 0;
             const body = el('div', { class: 'panel-body' });
             // Group by each definition's `section`, in first-seen order
             // (module registration order: Auto-login, Live updates, Market).
@@ -95,9 +110,6 @@ export const settingsModule = {
 
         function changed(def, value) {
             core.settings.set(def.key, value);
-            if (def.onChange) {
-                try { def.onChange(value); } catch (e) { console.error('[4clopX] setting onChange failed:', e); }
-            }
         }
 
         const reloadNote = (def) => (def.reload
@@ -114,6 +126,7 @@ export const settingsModule = {
                     onchange: (ev) => changed(def, ev.target.checked),
                 });
                 cb.checked = !!core.settings.get(def.key);
+                settingRefreshers.set(def.key, (value) => { cb.checked = !!value; });
                 return el('div', { class: 'checkbox clop-setting' }, [
                     el('label', {}, [cb, ` ${def.label}`, ...reloadNote(def)]),
                     ...description(def),
@@ -122,6 +135,7 @@ export const settingsModule = {
             if (def.type === 'number') {
                 const input = el('input', { class: 'form-control input-sm clop-setting-num', type: 'text' });
                 input.value = String(core.settings.get(def.key));
+                settingRefreshers.set(def.key, (value) => { input.value = String(value); });
                 input.addEventListener('change', () => {
                     const n = Number(input.value);
                     if (Number.isFinite(n)) changed(def, n);
@@ -134,14 +148,14 @@ export const settingsModule = {
             }
             if (def.type === 'choice') {
                 const buttons = new Map();
-                const select = (value) => {
-                    changed(def, value);
+                const refresh = (value) => {
                     for (const [candidate, button] of buttons) {
                         const selected = candidate === value;
                         button.classList.toggle('active', selected);
                         button.setAttribute('aria-checked', selected ? 'true' : 'false');
                     }
                 };
+                const select = (value) => changed(def, value);
                 const current = core.settings.get(def.key);
                 const choices = (def.options || []).map((option) => {
                     const selected = option.value === current;
@@ -161,6 +175,7 @@ export const settingsModule = {
                     buttons.set(option.value, button);
                     return button;
                 });
+                settingRefreshers.set(def.key, refresh);
                 return el('div', { class: 'clop-setting' }, [
                     el('div', {}, [def.label, ...reloadNote(def)]),
                     el('div', {
@@ -203,7 +218,9 @@ export const settingsModule = {
                 type: 'checkbox',
                 onchange: (ev) => core.marketNotify.set(mode, side, id, ev.target.checked),
             });
-            cb.checked = marketNotifyEnabled(mode, side, id);
+            const refresh = () => { cb.checked = marketNotifyEnabled(mode, side, id); };
+            refresh();
+            watchedMarketRefreshers.push(refresh);
             return el('td', {}, [cb]);
         }
 

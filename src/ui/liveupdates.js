@@ -231,6 +231,7 @@ export const liveUpdatesModule = {
             description: 'How often to check while some game tab is being looked at.',
             type: 'number',
             default: 30,
+            onChange: () => core.events.emit('live:intervalChanged', {}),
         });
         core.settings.define({
             key: 'live.intervalBlurred',
@@ -239,6 +240,7 @@ export const liveUpdatesModule = {
             description: 'How often to check while no game tab is visible.',
             type: 'number',
             default: 120,
+            onChange: () => core.events.emit('live:intervalChanged', {}),
         });
         core.settings.define({
             key: 'live.notify',
@@ -248,9 +250,11 @@ export const liveUpdatesModule = {
             type: 'bool',
             default: true,
             // The settings-UI click is a user gesture, which is exactly
-            // when browsers allow the permission prompt.
-            onChange: (on) => {
-                if (on && typeof Notification !== 'undefined' && Notification.permission === 'default') {
+            // when browsers allow the permission prompt.  Remote tabs adopt
+            // the preference but must not try to open their own prompt.
+            onChange: (on, { source } = {}) => {
+                if (source === 'local' && on
+                    && typeof Notification !== 'undefined' && Notification.permission === 'default') {
                     Notification.requestPermission();
                 }
             },
@@ -695,6 +699,11 @@ export const liveUpdatesModule = {
         updateMenuBadges();
         core.events.on('market:friendlyCache', updateMenuBadges);
         core.events.on('live:pollNow', requestPollNow);
+        // Whichever tab is currently the polling leader adopts interval
+        // changes immediately, even when they were made in another tab.
+        core.events.on('live:intervalChanged', () => {
+            if (leading && !polling && !stopped) schedule();
+        });
         core.events.on('market:viewing', (v) => { currentView = v; });
 
         // THE watch-toggle API — the settings panel, the inline market
@@ -765,9 +774,6 @@ export const liveUpdatesModule = {
             } else if (ev.key === K.friendly) {
                 // Badge data lives in the cache itself; consumers just
                 // recompute from it.
-                core.events.emit('market:friendlyCache', {});
-            } else if (ev.key === `clopx.setting.${UNAVAILABLE_SUMMARY_BADGES_KEY}`) {
-                // Keep aggregate ghost badges in sync across open tabs.
                 core.events.emit('market:friendlyCache', {});
             } else if (ev.key === NOTIFY_KEY) {
                 // Watch flags changed in another tab: refresh flag-dependent

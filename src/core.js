@@ -3,6 +3,8 @@
 // belongs in src/adapters/ (server protocol + HTML scraping) and src/ui/
 // (what gets rendered).
 
+const SETTING_STORAGE_PREFIX = 'clopx.setting.';
+
 export const core = {
     version: __CLOPX_VERSION__,
     modules: [],
@@ -26,6 +28,9 @@ export const core = {
                 console.error(`[4clopX] module "${mod.name}" settings registration failed:`, e);
             }
         }
+        // Definitions must exist before remote changes can be decoded and
+        // dispatched through their onChange hooks.
+        this.settings.startSync();
         for (const mod of this.modules) {
             let use = false;
             try { use = mod.matches(page, location); } catch (e) { /* ignore */ }
@@ -107,6 +112,7 @@ export const core = {
 
     settings: {
         _defs: new Map(),
+        _syncStarted: false,
 
         // def: {
         //   key, label, description,
@@ -116,8 +122,9 @@ export const core = {
         //   default,               // bool/number/choice
         //   options,               // choice: [{value, label, example?}]
         //   handler,               // button: invoked by the settings UI
-        //   onChange,              // optional: called by the settings UI
-        //                          //   with the new value after set()
+        //   onChange,              // optional: called in every open tab as
+        //                          //   onChange(value, {source}), where
+        //                          //   source is 'local' or 'remote'
         //   reload: true,          // optional: only takes effect after a
         //                          //   page reload (shown in the UI)
         // }
@@ -131,7 +138,7 @@ export const core = {
 
         get(key) {
             const def = this._defs.get(key);
-            const raw = core.storage.get(`clopx.setting.${key}`);
+            const raw = core.storage.get(`${SETTING_STORAGE_PREFIX}${key}`);
             if (raw === null) return def ? def.default : null;
             if (def && def.type === 'bool') return raw === '1';
             if (def && def.type === 'number') {
@@ -147,7 +154,34 @@ export const core = {
         set(key, value) {
             const def = this._defs.get(key);
             const raw = def && def.type === 'bool' ? (value ? '1' : '0') : String(value);
-            core.storage.set(`clopx.setting.${key}`, raw);
+            core.storage.set(`${SETTING_STORAGE_PREFIX}${key}`, raw);
+            this._applyChange(key, 'local');
+        },
+
+        _applyChange(key, source) {
+            const def = this._defs.get(key);
+            if (!def) return;
+            const value = this.get(key);
+            if (def.onChange) {
+                try {
+                    def.onChange(value, { source });
+                } catch (e) {
+                    console.error(`[4clopX] setting "${key}" onChange failed:`, e);
+                }
+            }
+            core.events.emit('settings:changed', { key, value, source });
+        },
+
+        startSync() {
+            if (this._syncStarted || typeof window === 'undefined') return;
+            this._syncStarted = true;
+            window.addEventListener('storage', (ev) => {
+                if (!ev.key || !ev.key.startsWith(SETTING_STORAGE_PREFIX)) return;
+                // The browser has already applied the remote value to this
+                // tab's localStorage.  Dispatch it without writing again,
+                // avoiding storage-event feedback loops.
+                this._applyChange(ev.key.slice(SETTING_STORAGE_PREFIX.length), 'remote');
+            });
         },
     },
 
