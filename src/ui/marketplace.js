@@ -24,6 +24,7 @@ const SIDES = [
     { side: 'buyer', label: 'Buy Orders', hint: 'Standing offers from buyers — sell to them here.' },
 ];
 const DEFAULT_BUY_ORDER_PRICE = '1000';
+const NEGATIVE_NET_CONFIRM_KEY = 'market.negativeNetSellConfirmMode';
 
 export function sellRevenueAfterTax(quantity, unitPrice, sellMultiplier) {
     return Math.floor(unitPrice * quantity * sellMultiplier);
@@ -43,6 +44,10 @@ export function unitPriceForSellRevenue(quantity, targetRevenue, sellMultiplier)
     return price;
 }
 
+export function saleWouldDipBelowReserve(stock, amount, reserve) {
+    return amount > 0 && stock - amount < reserve;
+}
+
 export const marketplaceModule = {
     name: 'marketplace',
 
@@ -52,9 +57,22 @@ export const marketplaceModule = {
 
     settings(core) {
         core.settings.define({
-            key: 'market.sellMaxNegativeNetConfirm',
-            label: 'Confirm Max sales when net production is negative',
-            description: 'Ask for confirmation before Sell Max, or a Max-sized sell listing, empties a stockpile whose per-tick net production is negative (i.e. one you are draining every tick).',
+            key: NEGATIVE_NET_CONFIRM_KEY,
+            label: 'Confirm sales when net production is negative',
+            description: 'Choose whether to confirm every resource sale, only habitual Max sales, or no sales when that resource is being drained each tick.',
+            type: 'choice',
+            options: [
+                { value: 'always', label: 'Always' },
+                { value: 'max', label: 'Max sales only' },
+                { value: 'never', label: 'Never' },
+            ],
+            default: 'always',
+            section: 'Market',
+        });
+        core.settings.define({
+            key: 'market.belowUpkeepSellConfirm',
+            label: 'Confirm sales that dip into upkeep',
+            description: 'Ask for confirmation before a non-Max sale or sell listing leaves the resource stockpile below the upkeep and military reserve protected by Sell Max.',
             type: 'bool',
             default: true,
             section: 'Market',
@@ -303,6 +321,64 @@ export const marketplaceModule = {
             }
         }
 
+        function confirmNegativeNet(fresh, name, enabled, actionText) {
+            if (fresh.net >= 0 || !enabled) return true;
+            return window.confirm(
+                `Your net ${name} production is NEGATIVE (${core.commas(fresh.net)}/tick) — ` +
+                'you are draining this stockpile every tick.\n\n' +
+                `${actionText} anyway?`);
+        }
+
+        function confirmBelowUpkeep(fresh, name, amount, verb) {
+            if (!core.settings.get('market.belowUpkeepSellConfirm')) return true;
+            const n = Number(amount);
+            const reserve = reserveOf(fresh);
+            const remaining = fresh.qty - n;
+            if (!saleWouldDipBelowReserve(fresh.qty, n, reserve)) return true;
+            const actionText = `${verb} ${core.commas(amount)} ${name}`;
+            const gerund = verb === 'List' ? 'Listing' : 'Selling';
+            return window.confirm(
+                `${gerund} ${core.commas(amount)} ${name} would leave you with ` +
+                `${core.commas(Math.max(0, remaining))}, below your reserve of ${core.commas(reserve)} ` +
+                `(${reserveText(fresh)}).\n\n${actionText} anyway?`);
+        }
+
+        // Non-Max sales have independent negative-net and below-upkeep
+        // confirmations.  Refresh the Overview once immediately before acting
+        // so both decisions use current data; cancelling preserves form input.
+        function regularSale(resourceId, amount, verb, action) {
+            const checkNet = core.settings.get(NEGATIVE_NET_CONFIRM_KEY) === 'always';
+            const checkUpkeep = core.settings.get('market.belowUpkeepSellConfirm');
+            if (mode || (!checkNet && !checkUpkeep)) return run(action);
+            if (state.busy) return Promise.resolve();
+            setBusy(true);
+            let cancelled = false;
+            return (async () => {
+                try {
+                    const name = resourceName(resourceId);
+                    const stats = await fetchResourceStats(core);
+                    state.upkeep = stats;
+                    const fresh = stats.byName[name.toLowerCase()];
+                    if (fresh && !confirmNegativeNet(fresh, name, checkNet,
+                        `${verb} ${core.commas(amount)} ${name}`)) {
+                        cancelled = true;
+                        return;
+                    }
+                    if (fresh && !confirmBelowUpkeep(fresh, name, amount, verb)) {
+                        cancelled = true;
+                        return;
+                    }
+                    merge(await action());
+                } catch (e) {
+                    state.messages = { errors: [String(e.message || e)], infos: [] };
+                } finally {
+                    setBusy(false);
+                    if (cancelled) updateMaxUi();
+                    else render();
+                }
+            })();
+        }
+
         // Re-fetch the Overview and abort unless upkeep AND the resulting
         // Max amount still match what the UI promised (protects against
         // building changes or stock movements in another tab).  Returns
@@ -333,13 +409,8 @@ export const marketplaceModule = {
                 };
                 return 'changed';
             }
-            if (fresh.net < 0 && core.settings.get('market.sellMaxNegativeNetConfirm')) {
-                const ok = window.confirm(
-                    `Your net ${name} production is NEGATIVE (${core.commas(fresh.net)}/tick) — ` +
-                    'you are draining this stockpile every tick.\n\n' +
-                    `${wording.confirmVerb} ${core.commas(expected.n)} anyway?`);
-                if (!ok) return 'cancelled';
-            }
+            if (!confirmNegativeNet(fresh, name, core.settings.get(NEGATIVE_NET_CONFIRM_KEY) !== 'never',
+                `${wording.confirmVerb} ${core.commas(expected.n)}`)) return 'cancelled';
             return 'ok';
         }
 
@@ -853,6 +924,11 @@ export const marketplaceModule = {
                         placeMaxListing(state.activeId, maxExpected, amountValue, priceValue, submit);
                         return;
                     }
+                    if (sell) {
+                        regularSale(state.activeId, amountValue, 'List',
+                            () => adapter().createOrder(state.activeId, amountValue, priceValue));
+                        return;
+                    }
                     run(() => adapter().createOrder(state.activeId, amountValue, priceValue));
                 },
             }, [
@@ -997,11 +1073,13 @@ export const marketplaceModule = {
             } else {
                 actions.appendChild(el('button', {
                     class: 'btn btn-primary btn-sm', type: 'button',
-                    onclick: () => run(() => adapter().takeOrder(order, 'one')),
+                    onclick: () => regularSale(order.resourceId, 1, 'Sell',
+                        () => adapter().takeOrder(order, 'one')),
                 }, [bold('Sell One')]));
                 actions.appendChild(sellButton(order));
                 actions.appendChild(amountForm('Sell:', 'btn-success',
-                    (n) => run(() => adapter().takeOrder(order, n)),
+                    (n) => regularSale(order.resourceId, n, 'Sell',
+                        () => adapter().takeOrder(order, n)),
                     (n) => `get ${core.commas(Math.floor(order.price * n * state.mult.sell))} bits`));
             }
 
@@ -1025,7 +1103,8 @@ export const marketplaceModule = {
             const allBits = core.commas(Math.floor(order.price * order.amount * state.mult.sell));
             const sellAll = () => el('button', {
                 class: 'btn btn-warning btn-sm clop-sellbtn', type: 'button',
-                onclick: () => run(() => adapter().takeOrder(order, 'all')),
+                onclick: () => regularSale(order.resourceId, order.amount, 'Sell',
+                    () => adapter().takeOrder(order, 'all')),
             }, [bold('Sell All'), ` (${allBits} bits)`]);
 
             const up = mode ? null : upkeepFor(order.resourceId);

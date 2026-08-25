@@ -112,8 +112,9 @@ export const core = {
         //   key, label, description,
         //   section,               // settings-panel grouping (e.g. 'Market');
         //                          //   sections appear in first-seen order
-        //   type: 'bool' | 'number' | 'button',
-        //   default,               // bool/number
+        //   type: 'bool' | 'number' | 'choice' | 'button',
+        //   default,               // bool/number/choice
+        //   options,               // choice: [{value, label}]
         //   handler,               // button: invoked by the settings UI
         //   onChange,              // optional: called by the settings UI
         //                          //   with the new value after set()
@@ -136,6 +137,9 @@ export const core = {
             if (def && def.type === 'number') {
                 const n = Number(raw);
                 return Number.isFinite(n) ? n : def.default;
+            }
+            if (def && def.type === 'choice') {
+                return (def.options || []).some((option) => option.value === raw) ? raw : def.default;
             }
             return raw;
         },

@@ -1,7 +1,7 @@
 // Settings panel: a ⚙ entry in the navbar's right group (next to the
 // live-update countdown) opening a modal overlay that renders every
 // setting registered in core.settings — checkboxes for bools, inputs for
-// numbers, buttons for actions.  Values save immediately on change;
+// numbers, segmented controls for choices, and buttons for actions.  Values save immediately on change;
 // definitions flagged `reload: true` are marked as taking effect after a
 // page reload, and `onChange` hooks let modules react to edits live.
 //
@@ -32,6 +32,8 @@ export const settingsModule = {
             .clop-setting.checkbox { margin-top: 0; }
             .clop-setting small { display: block; margin-top: 2px; }
             .clop-setting-num { width: 90px; display: inline-block; margin-left: 8px; }
+            .clop-setting-choice { display: inline-block; margin-top: 5px; }
+            .clop-setting-choice .btn.active { color: #fff; background: #5bc0de; border-color: #46b8da; box-shadow: none; text-shadow: none; }
             .clop-setting-group { font-weight: bold; margin: 12px 0 4px 0; }
             .clop-section-heading { font-weight: bold; font-size: 15px; border-bottom: 1px solid rgba(128,128,128,.4); padding-bottom: 4px; margin: 20px 0 10px 0; }
             .clop-settings-panel .panel-body > .clop-section-heading:first-child { margin-top: 0; }
@@ -124,6 +126,39 @@ export const settingsModule = {
                 });
                 return el('div', { class: 'clop-setting' }, [
                     el('label', {}, [def.label, input, ...reloadNote(def)]),
+                    ...description(def),
+                ]);
+            }
+            if (def.type === 'choice') {
+                const buttons = new Map();
+                const select = (value) => {
+                    changed(def, value);
+                    for (const [candidate, button] of buttons) {
+                        const selected = candidate === value;
+                        button.classList.toggle('active', selected);
+                        button.setAttribute('aria-checked', selected ? 'true' : 'false');
+                    }
+                };
+                const current = core.settings.get(def.key);
+                const choices = (def.options || []).map((option) => {
+                    const selected = option.value === current;
+                    const button = el('button', {
+                        class: `btn btn-default btn-sm${selected ? ' active' : ''}`,
+                        type: 'button',
+                        role: 'radio',
+                        'aria-checked': selected ? 'true' : 'false',
+                        onclick: () => select(option.value),
+                    }, [option.label]);
+                    buttons.set(option.value, button);
+                    return button;
+                });
+                return el('div', { class: 'clop-setting' }, [
+                    el('div', {}, [def.label, ...reloadNote(def)]),
+                    el('div', {
+                        class: 'btn-group clop-setting-choice',
+                        role: 'radiogroup',
+                        'aria-label': def.label,
+                    }, choices),
                     ...description(def),
                 ]);
             }
