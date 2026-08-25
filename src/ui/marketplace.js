@@ -5,11 +5,12 @@
 // handles MarketSnapshot objects.
 //
 // Both stock pages host the same UI; the URL is kept in sync with the
-// active side via history.replaceState so refresh and bookmarks land on the
-// same view.
+// active side and resource via history.replaceState so refresh and shortcuts
+// land on the same view.
 
 import {
-    marketAdapter, kindFromLocation, marketPageUrl, parseToken, parseMode,
+    marketAdapter, kindFromLocation, marketViewUrl,
+    marketResourceFromLocation, parseToken, parseMode,
     marketIsEmpty, hideStockMarketUi, stockUiInsertionPoint, summarizeFriendly,
 } from '../adapters/market.js';
 import { fetchResourceStats } from '../adapters/overview.js';
@@ -144,6 +145,8 @@ export const marketplaceModule = {
             upkeep: null,                          // resource stats from overview.php
             showHelp: false,
         };
+        let pendingLinkedId = null;
+        let initialFriendly = null;
 
         // Favourites are kept separately per side (and per mode); names are
         // stored alongside ids so other pages can label them.
@@ -163,18 +166,37 @@ export const marketplaceModule = {
         // Cache the server's resource order (used to sort favourite lists,
         // e.g. in the settings panel).
         if (state.resources.length) writeMarketCatalog(mode, state.resources);
-        if (boot.resourceId) {
+        const linkedId = marketResourceFromLocation(location);
+        const linked = linkedId && state.resources.find((resource) => resource.id === linkedId);
+        if (linked) {
+            state.activeId = linked.id;
+            // A restored POST document can contain a different resource's
+            // orders; never display those beneath the deep-linked tab.
+            if (boot.resourceId === linked.id) {
+                initialFriendly = { side: hostKind, resourceId: linked.id, orders: boot.orders };
+                if (boot.orders.length || marketIsEmpty(document)) state.updatedAt = new Date();
+            } else {
+                state.orders = [];
+            }
+        } else if (boot.resourceId) {
             state.activeId = boot.resourceId;
-            recordFriendly(hostKind, boot.resourceId, boot.orders);
+            initialFriendly = { side: hostKind, resourceId: boot.resourceId, orders: boot.orders };
             if (boot.orders.length || marketIsEmpty(document)) state.updatedAt = new Date();
         } else {
             const remembered = core.storage.get(lastKey(hostKind));
             if (remembered && state.resources.some((r) => r.id === remembered)) state.activeId = remembered;
         }
+        if (linkedId && !linked) {
+            state.messages.infos.push(`The saved market resource ${linkedId} is no longer available; showing the normal market instead.`);
+        }
+        try {
+            history.replaceState(null, '', marketViewUrl(state.side, mode, state.activeId));
+        } catch (e) { /* ignore */ }
         // Announce the initial view (merge() keeps this current afterwards).
         if (state.activeId) {
             core.events.emit('market:viewing', {
                 mode, side: state.side, resourceId: state.activeId,
+                resourceName: resourceName(state.activeId),
                 at: state.updatedAt ? Date.now() : 0,
             });
         }
@@ -286,6 +308,9 @@ export const marketplaceModule = {
                 core.events.emit('market:friendlyCache', {});
             }
         }
+        if (initialFriendly) {
+            recordFriendly(initialFriendly.side, initialFriendly.resourceId, initialFriendly.orders);
+        }
 
         // opts.auto marks a background refresh: the message area is kept
         // unless the response actually carries messages.  Returns whether
@@ -303,11 +328,17 @@ export const marketplaceModule = {
                 state.activeId = snap.resourceId;
                 recordFriendly(snap.kind, snap.resourceId, snap.orders);
                 core.storage.set(lastKey(snap.kind), snap.resourceId);
+                try {
+                    history.replaceState(null, '', marketViewUrl(snap.kind, mode, snap.resourceId));
+                } catch (e) { /* ignore */ }
             }
             state.updatedAt = new Date();
             // Tell the live-update engine what this tab is looking at, so
             // its sweeps include the open market (watched or ad-hoc).
-            core.events.emit('market:viewing', { mode, side: snap.kind, resourceId: state.activeId, at: Date.now() });
+            core.events.emit('market:viewing', {
+                mode, side: snap.kind, resourceId: state.activeId,
+                resourceName: resourceName(state.activeId), at: Date.now(),
+            });
             return replaceMessages;
         }
 
@@ -325,6 +356,14 @@ export const marketplaceModule = {
                 setBusy(false);
                 if (fullRender) render();
                 else refreshOrdersView();
+                if (pendingLinkedId && pendingLinkedId !== state.activeId) {
+                    const requested = pendingLinkedId;
+                    pendingLinkedId = null;
+                    try { history.replaceState(null, '', marketViewUrl(state.side, mode, requested)); } catch (e) { /* ignore */ }
+                    setTimeout(() => loadAndPoll(requested), 0);
+                } else {
+                    pendingLinkedId = null;
+                }
             }
         }
 
@@ -495,7 +534,7 @@ export const marketplaceModule = {
             state.updatedAt = null;
             state.messages = { errors: [], infos: [] };
             // Keep the URL aligned with the stock page for this side.
-            try { history.replaceState(null, '', marketPageUrl(side, mode)); } catch (e) { /* ignore */ }
+            try { history.replaceState(null, '', marketViewUrl(side, mode, state.activeId)); } catch (e) { /* ignore */ }
             render();
             maybeFetchUpkeep();
             loadAndPoll(state.activeId);
@@ -615,7 +654,7 @@ export const marketplaceModule = {
             const tabs = el('ul', { class: 'nav nav-pills clop-tabs' });
             for (const r of visible) {
                 const label = r.have ? `${r.name} (${core.commas(r.have)})` : r.name;
-                const a = el('a', { onclick: () => load(r.id) }, [label]);
+                const a = el('a', { href: marketViewUrl(state.side, mode, r.id) }, [label]);
                 const mark = watchMarkFor(r.id);
                 if (mark) a.appendChild(mark);
                 for (const badge of badgesFor(r.id)) a.appendChild(badge);
@@ -1296,6 +1335,28 @@ export const marketplaceModule = {
 
         hideStockMarketUi(content);
         content.insertBefore(root, stockUiInsertionPoint(content));
+
+        // Resource pills and shortcuts are real fragment links.  A change on
+        // this already-open marketplace tab is fulfilled dynamically through
+        // the same adapter; changing side or mode still performs a normal
+        // navigation because those live in the path/query portion.
+        window.addEventListener('hashchange', () => {
+            const resourceId = marketResourceFromLocation(location);
+            if (!resourceId || resourceId === state.activeId) return;
+            if (!state.resources.some((resource) => resource.id === resourceId)) {
+                state.messages = {
+                    errors: [`Market resource ${resourceId} is no longer available.`],
+                    infos: [],
+                };
+                render();
+                return;
+            }
+            if (state.busy) {
+                pendingLinkedId = resourceId;
+                return;
+            }
+            loadAndPoll(resourceId);
+        });
         render();
 
         // Orders only come with POST responses, so a remembered resource has

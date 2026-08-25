@@ -5,7 +5,10 @@ import {
     orderShouldStayEmphasized, saleWouldDipBelowReserve,
     sellRevenueAfterTax, unitPriceForSellRevenue,
 } from '../src/ui/marketplace.js';
-import { marketResourcesFromDocument, summarizeFriendly } from '../src/adapters/market.js';
+import {
+    marketResourceFromLocation, marketResourcesFromDocument,
+    marketViewUrl, summarizeFriendly,
+} from '../src/adapters/market.js';
 import {
     buyerResourceHasSpare, friendlyTotals, watchedOrderTotals, writeFriendlyCacheEntry,
 } from '../src/ui/liveupdates.js';
@@ -58,6 +61,14 @@ test('parses named market resources and comma-formatted stock amounts', () => {
     assert.deepEqual(marketResourcesFromDocument(doc), [{
         id: '7', name: 'Coffee', have: 12345, selected: true,
     }]);
+});
+
+test('encodes and reads client-side marketplace deep links', () => {
+    assert.equal(marketViewUrl('sell', '', '7'), 'marketplace.php#clopx-market=7');
+    assert.equal(marketViewUrl('buyer', 'armor', 'a b'),
+        'buyermarketplace.php?mode=armor#clopx-market=a%20b');
+    assert.equal(marketResourceFromLocation({ hash: '#clopx-market=a%20b' }), 'a b');
+    assert.equal(marketResourceFromLocation({ hash: '#something-else' }), null);
 });
 
 test('splits friendly orders into actionable and unavailable totals', () => {

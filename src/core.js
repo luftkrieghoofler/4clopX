@@ -122,6 +122,8 @@ export const core = {
         //   default,               // bool/number/choice
         //   options,               // choice: [{value, label, example?}]
         //   handler,               // button: invoked by the settings UI
+        //   feedback: false,       // button: do not replace its label with
+        //                          //   transient progress/completion text
         //   onChange,              // optional: called in every open tab as
         //                          //   onChange(value, {source}), where
         //                          //   source is 'local' or 'remote'

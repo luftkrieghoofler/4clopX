@@ -12,6 +12,8 @@ Install a userscript manager (Violentmonkey, Tampermonkey, or Greasemonkey), the
 
 **Auto-login**: if enabled, when the game expires your session the script logs you back in and takes you to the page you were trying to open instead of the login screen.
 
+**Shortcut bar**: save frequently used destinations in a sticky row below the stock navigation. The 🔖 button saves the current view, including specific nations, alliances, and individual resource, weapon, or armor markets. Shortcuts are real links that can be opened in a new tab, can mirror menu notification badges, and can be renamed and reordered from the shortcut manager in ⚙ settings. The manager can also add several destinations directly from the stock game menu. A dismissible introduction shows where the empty bar will appear until the first shortcut is saved.
+
 **Marketplace**:
 
 - Sell orders and buy orders become one page with two tabs. Switching sides, switching resources, buying, selling, placing and removing orders all happen in place, without page loads. The stock menu entries still work and open the side they always led to.

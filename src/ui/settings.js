@@ -74,6 +74,7 @@ export const settingsModule = {
         core.events.on('market:favouritesChanged', (change) => {
             if (marketEditor) marketEditor.refreshFavourites(change);
         });
+        core.events.on('settings:close', closePanel);
         window.addEventListener('storage', (ev) => {
             const favouriteChange = favouriteStorageChange(ev.key);
             if (favouriteChange) core.events.emit('market:favouritesChanged', favouriteChange);
@@ -209,6 +210,14 @@ export const settingsModule = {
             }
             if (def.type === 'button') {
                 const btn = el('button', { class: 'btn btn-default btn-sm', type: 'button' }, [def.label]);
+                if (def.feedback === false) {
+                    btn.addEventListener('click', () => {
+                        Promise.resolve()
+                            .then(() => def.handler && def.handler())
+                            .catch((e) => console.error(`[4clopX] setting action "${def.key}" failed:`, e));
+                    });
+                    return el('div', { class: 'clop-setting' }, [btn, ...description(def)]);
+                }
                 btn.addEventListener('click', () => {
                     btn.disabled = true;
                     Promise.resolve()

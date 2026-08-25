@@ -40,9 +40,30 @@
 //     retry with the token from that same response is always safe.
 
 const PAGES = { sell: 'marketplace.php', buyer: 'buyermarketplace.php' };
+export const MARKET_VIEW_HASH_KEY = 'clopx-market';
 
 export function marketPageUrl(kind, mode) {
     return PAGES[kind] + (mode ? `?mode=${encodeURIComponent(mode)}` : '');
+}
+
+// The stock server selects markets through POST, so the userscript adds a
+// fragment-only deep link.  Fragments never reach the server, remain safe if
+// the userscript is disabled, and still behave like real links for middle
+// click / open-in-new-tab.
+export function marketViewUrl(kind, mode, resourceId) {
+    const page = marketPageUrl(kind, mode);
+    return resourceId
+        ? `${page}#${MARKET_VIEW_HASH_KEY}=${encodeURIComponent(resourceId)}`
+        : page;
+}
+
+export function marketResourceFromLocation(loc) {
+    try {
+        const params = new URLSearchParams(String(loc.hash || '').replace(/^#/, ''));
+        return params.get(MARKET_VIEW_HASH_KEY) || null;
+    } catch (e) {
+        return null;
+    }
 }
 
 export function kindFromLocation(loc) {
