@@ -42,8 +42,8 @@ export const settingsModule = {
             .clop-setting-choice { display: inline-block; margin-top: 5px; }
             .clop-setting-choice .btn.active { color: #fff; background: #5bc0de; border-color: #46b8da; box-shadow: none; text-shadow: none; }
             .clop-choice-example { margin-left: 4px; }
-            .clop-choice-example-blue { background: #5bc0de; color: #fff; }
-            .clop-choice-example-grey { background: #777; color: #fff; }
+            .clop-choice-example-accent { background-color: var(--clop-market-order-badge-color, #5bc0de) !important; background-image: none !important; color: #fff !important; text-shadow: none !important; }
+            .clop-setting-choice .btn.active .clop-choice-example { box-shadow: 0 0 0 1px rgba(255,255,255,.9), 0 0 0 2px rgba(0,0,0,.22); }
             .clop-setting-group { font-weight: bold; margin: 12px 0 4px 0; }
             .clop-section-heading { font-weight: bold; font-size: 15px; border-bottom: 1px solid rgba(128,128,128,.4); padding-bottom: 4px; margin: 20px 0 10px 0; }
             .clop-settings-panel .panel-body > .clop-section-heading:first-child { margin-top: 0; }
@@ -149,6 +149,17 @@ export const settingsModule = {
             ? [el('small', { class: 'text-muted' }, [def.description])]
             : []);
 
+        function applyStockBadgeStyle(node) {
+            const probe = el('span', { class: 'badge' }, ['0']);
+            probe.style.cssText = 'position:absolute;visibility:hidden;pointer-events:none;';
+            document.body.appendChild(probe);
+            const style = window.getComputedStyle(probe);
+            node.style.backgroundColor = style.backgroundColor;
+            node.style.backgroundImage = style.backgroundImage;
+            node.style.color = style.color;
+            probe.remove();
+        }
+
         function withParent(def, row, controls) {
             if (!def.parent) return row;
             row.classList.add('clop-setting-child');
@@ -204,9 +215,11 @@ export const settingsModule = {
                     const selected = option.value === current;
                     const children = [option.label];
                     if (option.example) {
-                        children.push(el('span', {
+                        const example = el('span', {
                             class: `badge clop-choice-example ${option.example.class || ''}`,
-                        }, [String(option.example.text)]));
+                        }, [String(option.example.text)]);
+                        if (option.example.stock) applyStockBadgeStyle(example);
+                        children.push(example);
                     }
                     const button = el('button', {
                         class: `btn btn-default btn-sm${selected ? ' active' : ''}`,

@@ -144,6 +144,13 @@ export function watchedOrderTotals() {
 
 export const watchedOrderTotal = () => watchedOrderTotals().orders;
 
+export function marketBadgeAccentForStockColor(stockBackground) {
+    const channels = String(stockBackground).match(/[\d.]+/g)?.slice(0, 3).map(Number);
+    if (!channels || channels.length < 3) return '#5bc0de';
+    const [red, green, blue] = channels;
+    return blue - red >= 60 && blue - green >= 25 ? '#5cb85c' : '#5bc0de';
+}
+
 export function buyerResourceHasSpare(stats, resourceName, fallback = true) {
     if (!stats || !resourceName) return fallback;
     const resource = stats.byName && stats.byName[String(resourceName).toLowerCase()];
@@ -272,15 +279,15 @@ export const liveUpdatesModule = {
         core.settings.define({
             key: 'market.blueBadges',
             label: 'Market-order badges',
-            description: 'Choose the filled badge colour for actionable alliance/friend orders. Outlined badges always mean orders you cannot currently fulfil.',
+            description: 'Choose a contrasting market accent or the game theme\'s stock notification style for actionable alliance/friend orders. Outlined badges always mean orders you cannot currently fulfil.',
             type: 'choice',
             options: [
-                { value: '1', label: 'Blue', example: { text: '3', class: 'clop-choice-example-blue' } },
-                { value: '0', label: 'Grey', example: { text: '3', class: 'clop-choice-example-grey' } },
+                { value: '1', label: 'Accent', example: { text: '3', class: 'clop-choice-example-accent' } },
+                { value: '0', label: 'Stock', example: { text: '3', stock: true } },
             ],
             default: '1',
             section: 'Market',
-            onChange: (value) => document.body.classList.toggle('clop-blue-badges', value === '1'),
+            onChange: (value) => document.body.classList.toggle('clop-accent-market-badges', value === '1'),
         });
         core.settings.define({
             key: UNAVAILABLE_SUMMARY_BADGES_KEY,
@@ -309,6 +316,15 @@ export const liveUpdatesModule = {
         let pollTimer = null;
         let currentView = null;      // {mode, side, resourceId, at} open in THIS tab's marketplace
 
+        const stockBadgeProbe = el('span', { class: 'badge' }, ['0']);
+        stockBadgeProbe.style.cssText = 'position:absolute;visibility:hidden;pointer-events:none;';
+        document.body.appendChild(stockBadgeProbe);
+        const badgeAccent = marketBadgeAccentForStockColor(
+            window.getComputedStyle(stockBadgeProbe).backgroundColor,
+        );
+        stockBadgeProbe.remove();
+        document.documentElement.style.setProperty('--clop-market-order-badge-color', badgeAccent);
+
         // True while THIS tab's marketplace loaded exactly this market a
         // few seconds ago — marketplace loads trigger a pollNow, so the
         // sweep must not fetch what the view just fetched.
@@ -320,12 +336,11 @@ export const liveUpdatesModule = {
 
         core.addStyle(`
             .clop-menu-badge { margin-left: 5px; }
-            .clop-actionable-market-badge { background-color: #777 !important; color: #fff !important; text-shadow: none; }
-            body.clop-blue-badges .clop-actionable-market-badge { background-color: #5bc0de !important; color: #fff !important; }
+            body.clop-accent-market-badges .clop-actionable-market-badge { background-color: var(--clop-market-order-badge-color, #5bc0de) !important; background-image: none !important; color: #fff !important; text-shadow: none !important; }
             .clop-unavailable-market-badge { background: transparent !important; color: #999 !important; border: 1px solid #aaa; box-shadow: none; text-shadow: none; }
             #clop-market-root .clop-tabs > li.active > a > .clop-unavailable-market-badge { color: rgba(255,255,255,.85) !important; border-color: rgba(255,255,255,.75); }
         `);
-        document.body.classList.toggle('clop-blue-badges', core.settings.get('market.blueBadges') === '1');
+        document.body.classList.toggle('clop-accent-market-badges', core.settings.get('market.blueBadges') === '1');
 
         /* ---------------- alliance-order menu badges ---------------- */
 

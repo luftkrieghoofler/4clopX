@@ -10,8 +10,29 @@ import {
     marketViewUrl, summarizeFriendly,
 } from '../src/adapters/market.js';
 import {
-    buyerResourceHasSpare, friendlyTotals, watchedOrderTotals, writeFriendlyCacheEntry,
+    buyerResourceHasSpare, friendlyTotals, liveUpdatesModule,
+    marketBadgeAccentForStockColor, watchedOrderTotals, writeFriendlyCacheEntry,
 } from '../src/ui/liveupdates.js';
+
+test('uses green market badges only when the game theme already uses blue badges', () => {
+    assert.equal(marketBadgeAccentForStockColor('rgb(42, 159, 214)'), '#5cb85c');
+    assert.equal(marketBadgeAccentForStockColor('rgb(122, 130, 136)'), '#5bc0de');
+    assert.equal(marketBadgeAccentForStockColor('rgb(153, 153, 153)'), '#5bc0de');
+    assert.equal(marketBadgeAccentForStockColor('transparent'), '#5bc0de');
+});
+
+test('offers contrasting-accent and stock-theme market badge styles', () => {
+    const definitions = [];
+    liveUpdatesModule.settings({ settings: { define: (definition) => definitions.push(definition) } });
+
+    const badgeSetting = definitions.find(({ key }) => key === 'market.blueBadges');
+    assert.deepEqual(badgeSetting.options.map(({ value, label }) => ({ value, label })), [
+        { value: '1', label: 'Accent' },
+        { value: '0', label: 'Stock' },
+    ]);
+    assert.equal(badgeSetting.options[0].example.class, 'clop-choice-example-accent');
+    assert.equal(badgeSetting.options[1].example.stock, true);
+});
 
 test('calculates the lowest unit price that meets an after-tax revenue target', () => {
     const price = unitPriceForSellRevenue(10, 1000, 0.95);
