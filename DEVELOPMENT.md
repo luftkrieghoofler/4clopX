@@ -50,3 +50,15 @@ The script exports a debug handle to the page window: `clopX` (e.g. `clopX.setti
 ## Adding a module
 
 A module is `{ name, matches(page, location), settings?(core), init(core) }`. `settings()` registers the module's `core.settings.define()` entries and runs on every page regardless of `matches()` (the settings panel is global); `init()` is the page-scoped UI. Create the module in `src/ui/`, register it in `src/main.js`, rebuild. If it needs new server interactions, keep the protocol and parsing in a `src/adapters/` file.
+
+## Safe-action catalogue
+
+`src/data/actions.generated.js` pairs each action's mechanics with the normalized description from the same CLOP backend snapshot. At runtime, action safety uses those mechanics only when the live name and description still match exactly (apart from whitespace). A mismatch is deliberately treated as incompatible rather than guessing from prose.
+
+The initial snapshot can be regenerated from a CLOP SQL dump with:
+
+```sh
+node scripts/generate-action-data.mjs "/path/to/tables with data.sql"
+```
+
+For a live rebalance that is not available as structured data, update the affected action and its description together in `src/data/actions.generated.js`; update its entry in `BUILDING_UPKEEP` too when its resulting building upkeep changed. New actions need a complete catalogue entry before the script will protect them.

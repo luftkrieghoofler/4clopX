@@ -2,6 +2,7 @@ import { core } from './core.js';
 import { autologinModule } from './ui/autologin.js';
 import { shortcutsModule } from './ui/shortcuts.js';
 import { marketplaceModule } from './ui/marketplace.js';
+import { actionsModule } from './ui/actions.js';
 import { liveUpdatesModule } from './ui/liveupdates.js';
 import { settingsModule } from './ui/settings.js';
 
@@ -15,6 +16,7 @@ core.register(autologinModule);
 core.register(shortcutsModule);
 core.register(liveUpdatesModule);
 core.register(marketplaceModule);
+core.register(actionsModule);
 core.register(settingsModule);
 core.boot();
 

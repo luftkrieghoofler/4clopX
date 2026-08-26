@@ -12,7 +12,14 @@
 // table inside the same panel, is exposed as `mil` (0 for everything else).
 // It is a 12-hour lump, NOT part of the per-tick "Used" column or "Net".
 //
-// Returns { byName: { <lowercased name>: {name, qty, used, mil, net} }, at: Date }.
+// Building quantities are included as `buildingsByName`, because action
+// upgrades can consume active buildings and thereby remove their upkeep.
+//
+// Returns {
+//   byName: { <lowercased name>: {name, qty, used, mil, net} },
+//   buildingsByName: { <lowercased name>: {name, qty, disabled, active} },
+//   at: Date,
+// }.
 
 function cellNumber(text) {
     const n = parseInt(text.replace(/,/g, '').trim(), 10);
@@ -53,11 +60,37 @@ export function parseResourceStats(doc) {
             // follows; words that aren't resource names (e.g. "12 hours")
             // simply don't match anything.
             for (const m of c.textContent.matchAll(/([\d,]+)\s+([A-Za-z]+)/g)) {
-                const entry = byName[m[2].toLowerCase()];
-                if (entry) entry.mil = cellNumber(m[1]);
+                const key = m[2].toLowerCase();
+                if (!byName[key]) {
+                    byName[key] = {
+                        name: `${m[2][0].toUpperCase()}${m[2].slice(1).toLowerCase()}`,
+                        qty: 0, used: 0, mil: 0, net: 0,
+                    };
+                }
+                byName[key].mil = cellNumber(m[1]);
             }
         }
-        return { byName, at: new Date() };
+
+        const buildingsByName = {};
+        for (const buildingPanel of doc.querySelectorAll('.panel')) {
+            const buildingHeading = buildingPanel.querySelector('.panel-heading');
+            if (!buildingHeading || buildingHeading.textContent.trim() !== 'Buildings') continue;
+            for (const tr of buildingPanel.querySelectorAll('tbody tr')) {
+                const cells = tr.querySelectorAll('td');
+                if (cells.length < 2) continue;
+                const name = cells[0].textContent.trim();
+                const quantityText = cells[1].textContent;
+                const qty = cellNumber(quantityText);
+                const disabledMatch = quantityText.match(/([\d,]+)\s+disabled/i);
+                const disabled = disabledMatch ? cellNumber(disabledMatch[1]) : 0;
+                if (!name) continue;
+                buildingsByName[name.toLowerCase()] = {
+                    name, qty, disabled, active: Math.max(0, qty - disabled),
+                };
+            }
+            break;
+        }
+        return { byName, buildingsByName, at: new Date() };
     }
     throw new Error('Could not find the Resources table on the Overview page.');
 }
