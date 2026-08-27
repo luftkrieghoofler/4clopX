@@ -1,4 +1,7 @@
 import { actionsFromDocument, actionFormsFromDocument, submittedAction } from '../adapters/actions.js';
+import {
+    formatTickDuration, tickIsImminent, tickSecondsFromDocument,
+} from '../adapters/header.js';
 import { fetchResourceStats } from '../adapters/overview.js';
 import { ACTION_CATALOG, BUILDING_UPKEEP } from '../data/actions.generated.js';
 import {
@@ -7,6 +10,7 @@ import {
 
 const SETTING_KEY = 'actions.confirmUpkeepRisk';
 const AUTHOR_URL = 'viewuser.php?user_id=64';
+const IMMINENT_TICK_SECONDS = 10 * 60;
 
 export const actionsModule = {
     name: 'actions',
@@ -140,18 +144,53 @@ export const actionsModule = {
             HTMLFormElement.prototype.submit.call(form);
         }
 
+        function confirmationBody(children) {
+            const untilTick = tickSecondsFromDocument(document);
+            const tickWarning = tickIsImminent(untilTick, IMMINENT_TICK_SECONDS)
+                ? el('div', { class: 'alert alert-danger' }, [
+                    el('strong', {}, [
+                        `Next tick is imminent — ${formatTickDuration(untilTick)} remaining.`,
+                    ]),
+                    el('div', {}, [
+                        'Consider waiting until after the tick, or make absolutely certain you can ' +
+                        'top up the affected stockpiles in time.',
+                    ]),
+                ])
+                : null;
+            return el('div', {}, [
+                ...(tickWarning ? [tickWarning] : []),
+                ...(Array.isArray(children) ? children : [children]),
+            ]);
+        }
+
         function unprotectedConfirmation(state) {
             const name = (state.actual && state.actual.name)
                 || (state.expected && state.expected.name) || `Action #${state.id}`;
             if (state.status === 'changed') {
-                return window.confirm(
-                    `${name} has changed from the version understood by 4clopX. ` +
-                    'Its effects cannot be checked safely.\n\nPerform it without safe-action protection?');
+                return core.confirm({
+                    title: 'Action mechanics changed',
+                    body: confirmationBody([
+                        el('div', { class: 'alert alert-danger' }, [
+                            el('strong', {}, [`${name} cannot be checked safely. `]),
+                            'Its live description differs from the version understood by 4clopX.',
+                        ]),
+                        el('p', {}, ['Perform it without safe-action protection?']),
+                    ]),
+                    confirmLabel: 'Perform anyway',
+                });
             }
             if (state.status === 'unknown') {
-                return window.confirm(
-                    `4clopX has no data for ${name}, so its effects cannot be checked safely.\n\n` +
-                    'Perform it without safe-action protection?');
+                return core.confirm({
+                    title: 'Unknown action mechanics',
+                    body: confirmationBody([
+                        el('div', { class: 'alert alert-danger' }, [
+                            el('strong', {}, [`${name} cannot be checked safely. `]),
+                            '4clopX has no mechanics data for this action.',
+                        ]),
+                        el('p', {}, ['Perform it without safe-action protection?']),
+                    ]),
+                    confirmLabel: 'Perform anyway',
+                });
             }
             return true;
         }
@@ -165,9 +204,18 @@ export const actionsModule = {
                     : `reserve ${core.commas(risk.reserveBefore)} → ${core.commas(risk.reserveAfter)}`;
                 return `• ${risk.name}: ${stock}; ${reserve}; short by ${core.commas(risk.shortage)}`;
             });
-            return window.confirm(
-                `${quantity} would leave insufficient stock for the protected upkeep reserve:\n\n` +
-                `${lines.join('\n')}\n\nPerform this action anyway?`);
+            return core.confirm({
+                title: 'Upkeep reserve at risk',
+                body: confirmationBody([
+                    el('div', { class: 'alert alert-warning' }, [
+                        el('strong', {}, [`${quantity} would leave insufficient stock `]),
+                        'for the protected upkeep reserve.',
+                    ]),
+                    el('ul', { class: 'clop-confirm-risk-list' }, lines.map((line) =>
+                        el('li', {}, [line.replace(/^•\s*/, '')]))),
+                ]),
+                confirmLabel: 'Perform anyway',
+            });
         }
 
         for (const record of forms) {
@@ -189,14 +237,21 @@ export const actionsModule = {
                     const actualActions = await actualActionsPromise;
                     const state = stateFor(record.id, actualActions);
                     if (state.status === 'changed' || state.status === 'unknown') {
-                        if (unprotectedConfirmation(state)) submitNatively(record.form);
+                        if (await unprotectedConfirmation(state)) submitNatively(record.form);
                         return;
                     }
                     if (state.status !== 'verified') {
                         const detail = loadError ? ` (${String(loadError.message || loadError)})` : '';
-                        if (window.confirm(
-                            `4clopX could not load the live description for this action${detail}.\n\n` +
-                            'Perform it without safe-action protection?')) submitNatively(record.form);
+                        if (await core.confirm({
+                            title: 'Action safety unavailable',
+                            body: confirmationBody([
+                                el('div', { class: 'alert alert-danger' }, [
+                                    `4clopX could not load the live description for this action${detail}.`,
+                                ]),
+                                el('p', {}, ['Perform it without safe-action protection?']),
+                            ]),
+                            confirmLabel: 'Perform anyway',
+                        })) submitNatively(record.form);
                         return;
                     }
                     if (submission.times < 1) {
@@ -204,9 +259,16 @@ export const actionsModule = {
                         return;
                     }
                     if (!Number.isSafeInteger(submission.times)) {
-                        if (window.confirm(
-                            'The action quantity is too large for 4clopX to check safely.\n\n' +
-                            'Perform it without safe-action protection?')) submitNatively(record.form);
+                        if (await core.confirm({
+                            title: 'Action quantity cannot be checked',
+                            body: confirmationBody([
+                                el('div', { class: 'alert alert-danger' }, [
+                                    'The action quantity is too large for 4clopX to calculate safely.',
+                                ]),
+                                el('p', {}, ['Perform it without safe-action protection?']),
+                            ]),
+                            confirmLabel: 'Perform anyway',
+                        })) submitNatively(record.form);
                         return;
                     }
                     if (!actionNeedsSafetyCheck(state.expected, BUILDING_UPKEEP)) {
@@ -218,14 +280,22 @@ export const actionsModule = {
                     try {
                         stats = await fetchResourceStats(core);
                     } catch (error) {
-                        if (window.confirm(
-                            `4clopX could not load your current stock and upkeep (${String(error.message || error)}).\n\n` +
-                            'Perform this action without safe-action protection?')) submitNatively(record.form);
+                        if (await core.confirm({
+                            title: 'Current stock could not be checked',
+                            body: confirmationBody([
+                                el('div', { class: 'alert alert-danger' }, [
+                                    `4clopX could not load your current stock and upkeep ` +
+                                    `(${String(error.message || error)}).`,
+                                ]),
+                                el('p', {}, ['Perform this action without safe-action protection?']),
+                            ]),
+                            confirmLabel: 'Perform anyway',
+                        })) submitNatively(record.form);
                         return;
                     }
                     const risks = projectActionRisks(
                         state.expected, submission.times, stats, BUILDING_UPKEEP);
-                    if (!risks.length || riskConfirmation(state.expected, submission.times, risks)) {
+                    if (!risks.length || await riskConfirmation(state.expected, submission.times, risks)) {
                         submitNatively(record.form);
                     }
                 } finally {

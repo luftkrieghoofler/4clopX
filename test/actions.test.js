@@ -2,6 +2,9 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import { phpInteger, submittedAction } from '../src/adapters/actions.js';
+import {
+    formatTickDuration, tickIsImminent, tickSecondsFromDocument, tickSecondsFromText,
+} from '../src/adapters/header.js';
 import { ACTION_CATALOG, BUILDING_UPKEEP } from '../src/data/actions.generated.js';
 import {
     actionCompatibility, actionNeedsSafetyCheck, projectActionRisks,
@@ -232,6 +235,20 @@ test('does not mistake embedded favourite-removal controls for performed actions
     assert.deepEqual(submittedAction(form, { name: 'perform' }), {
         id: '40', times: 3,
     });
+});
+
+test('reads the stock game tick countdown and applies a strict ten-minute threshold', () => {
+    assert.equal(tickSecondsFromText('0:09:59'), 599);
+    assert.equal(tickSecondsFromText('1:02:03'), 3723);
+    assert.equal(tickSecondsFromText('NOW!'), 0);
+    assert.equal(tickSecondsFromText('unknown'), null);
+    assert.equal(tickSecondsFromDocument({
+        querySelector: () => ({ textContent: ' 0:04:05 ' }),
+    }), 245);
+    assert.equal(tickIsImminent(599), true);
+    assert.equal(tickIsImminent(600), false);
+    assert.equal(tickIsImminent(null), false);
+    assert.equal(formatTickDuration(599), '9m 59s');
 });
 
 test('offers safe-action confirmation as a separate default-on setting', () => {

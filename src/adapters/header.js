@@ -11,6 +11,33 @@
 
 export const HEADER_PROBE_PAGE = 'guide.php';
 
+// The stock header's server-seeded countdown is kept current by the game.
+// Keep this parser here with the other stock-header scraping rather than
+// deriving tick time from the client's potentially-skewed clock.
+export function tickSecondsFromText(text) {
+    const value = String(text || '').trim();
+    if (/^now!?$/i.test(value)) return 0;
+    const match = value.match(/^(\d+):([0-5]\d):([0-5]\d)$/);
+    if (!match) return null;
+    return Number(match[1]) * 3600 + Number(match[2]) * 60 + Number(match[3]);
+}
+
+export function tickSecondsFromDocument(doc) {
+    return tickSecondsFromText(doc.querySelector('#countdown')?.textContent);
+}
+
+export function formatTickDuration(seconds) {
+    const whole = Math.max(0, Math.floor(seconds));
+    const minutes = Math.floor(whole / 60);
+    const remainder = whole % 60;
+    if (!minutes) return `${remainder}s`;
+    return `${minutes}m ${remainder}s`;
+}
+
+export function tickIsImminent(seconds, thresholdSeconds = 10 * 60) {
+    return Number.isFinite(seconds) && seconds >= 0 && seconds < thresholdSeconds;
+}
+
 // Stable identity for a navbar anchor carrying a badge: its href, or for
 // dropdown toggles (href="#") the first word of its label ("Alliance",
 // "Capitalism", "War", "Feedback").

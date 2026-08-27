@@ -1,4 +1,5 @@
 import { core } from './core.js';
+import { dialogsModule } from './ui/dialogs.js';
 import { autologinModule } from './ui/autologin.js';
 import { shortcutsModule } from './ui/shortcuts.js';
 import { marketplaceModule } from './ui/marketplace.js';
@@ -12,6 +13,7 @@ import { settingsModule } from './ui/settings.js';
 // during init, so the listener must already exist.  settings last, so its
 // panel sees every module's registered settings (and its ⚙ lands leftmost
 // in the navbar group).
+core.register(dialogsModule);
 core.register(autologinModule);
 core.register(shortcutsModule);
 core.register(liveUpdatesModule);

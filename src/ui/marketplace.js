@@ -414,10 +414,18 @@ export const marketplaceModule = {
 
         function confirmNegativeNet(fresh, name, enabled, actionText) {
             if (fresh.net >= 0 || !enabled) return true;
-            return window.confirm(
-                `Your net ${name} production is NEGATIVE (${core.commas(fresh.net)}/tick) — ` +
-                'you are draining this stockpile every tick.\n\n' +
-                `${actionText} anyway?`);
+            const verb = actionText.split(/\s+/, 1)[0];
+            return core.confirm({
+                title: `Negative ${name} production`,
+                body: el('div', {}, [
+                    el('div', { class: 'alert alert-warning' }, [
+                        el('strong', {}, ['This stockpile is already being drained. ']),
+                        `Your net ${name} production is ${core.commas(fresh.net)}/tick.`,
+                    ]),
+                    el('p', {}, [`${actionText} anyway?`]),
+                ]),
+                confirmLabel: `${verb} anyway`,
+            });
         }
 
         function confirmBelowUpkeep(fresh, name, amount, verb) {
@@ -428,10 +436,18 @@ export const marketplaceModule = {
             if (!saleWouldDipBelowReserve(fresh.qty, n, reserve)) return true;
             const actionText = `${verb} ${core.commas(amount)} ${name}`;
             const gerund = verb === 'List' ? 'Listing' : 'Selling';
-            return window.confirm(
-                `${gerund} ${core.commas(amount)} ${name} would leave you with ` +
-                `${core.commas(Math.max(0, remaining))}, below your reserve of ${core.commas(reserve)} ` +
-                `(${reserveText(fresh)}).\n\n${actionText} anyway?`);
+            return core.confirm({
+                title: 'Upkeep reserve at risk',
+                body: el('div', {}, [
+                    el('div', { class: 'alert alert-warning' }, [
+                        el('strong', {}, [`${gerund} would dip into your protected reserve. `]),
+                        `${core.commas(Math.max(0, remaining))} ${name} would remain, below the ` +
+                        `${core.commas(reserve)} reserve (${reserveText(fresh)}).`,
+                    ]),
+                    el('p', {}, [`${actionText} anyway?`]),
+                ]),
+                confirmLabel: `${verb} anyway`,
+            });
         }
 
         // Non-Max sales have independent negative-net and below-upkeep
@@ -450,12 +466,12 @@ export const marketplaceModule = {
                     const stats = await fetchResourceStats(core);
                     state.upkeep = stats;
                     const fresh = stats.byName[name.toLowerCase()];
-                    if (fresh && !confirmNegativeNet(fresh, name, checkNet,
-                        `${verb} ${core.commas(amount)} ${name}`)) {
+                    if (fresh && !(await confirmNegativeNet(fresh, name, checkNet,
+                        `${verb} ${core.commas(amount)} ${name}`))) {
                         cancelled = true;
                         return;
                     }
-                    if (fresh && !confirmBelowUpkeep(fresh, name, amount, verb)) {
+                    if (fresh && !(await confirmBelowUpkeep(fresh, name, amount, verb))) {
                         cancelled = true;
                         return;
                     }
@@ -500,8 +516,9 @@ export const marketplaceModule = {
                 };
                 return 'changed';
             }
-            if (!confirmNegativeNet(fresh, name, core.settings.get(NEGATIVE_NET_CONFIRM_KEY) !== 'never',
-                `${wording.confirmVerb} ${core.commas(expected.n)}`)) return 'cancelled';
+            if (!(await confirmNegativeNet(fresh, name,
+                core.settings.get(NEGATIVE_NET_CONFIRM_KEY) !== 'never',
+                `${wording.confirmVerb} ${core.commas(expected.n)}`))) return 'cancelled';
             return 'ok';
         }
 

@@ -14,6 +14,8 @@ Install a userscript manager (Violentmonkey, Tampermonkey, or Greasemonkey), the
 
 **Shortcut bar**: save frequently used destinations in a sticky row below the stock navigation. The 🔖 button saves the current view - any page should be supported, even individual markets. Shortcuts can be renamed and reordered from the shortcut manager in ⚙ settings.
 
+**Safe actions**: Actions and Favourite Actions are checked against your current stock and upkeep before they run. If construction costs or new building upkeep would leave a resource below its protected reserve, a themed confirmation explains the shortfall; it also highlights when the next game tick is less than ten minutes away.
+
 **Marketplace**:
 
 - Sell orders and buy orders become one page with two tabs. Switching sides, switching resources, buying, selling, placing and removing orders all happen in place, without page loads. The stock menu entries still work and open the side they always led to.
