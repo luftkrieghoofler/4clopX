@@ -1,17 +1,37 @@
-import { actionsFromDocument, actionFormsFromDocument, submittedAction } from '../adapters/actions.js';
+import {
+    actionsFromDocument, actionFormsFromDocument, phpInteger, submittedAction,
+} from '../adapters/actions.js';
 import {
     formatTickDuration, tickIsCritical, tickIsImminent, tickSecondsFromDocument,
 } from '../adapters/header.js';
 import { fetchResourceStats } from '../adapters/overview.js';
-import { ACTION_CATALOG, BUILDING_UPKEEP } from '../data/actions.generated.js';
+import { ACTION_CATALOG, BUILDING_EFFECTS, BUILDING_UPKEEP } from '../data/actions.generated.js';
 import {
-    actionCompatibility, actionNeedsSafetyCheck, projectActionRisks,
+    actionCompatibility, actionNeedsSafetyCheck, projectActionRisks, projectActionSatisfaction,
 } from '../lib/action-safety.js';
 
 const SETTING_KEY = 'actions.confirmUpkeepRisk';
 const AUTHOR_URL = 'viewuser.php?user_id=64';
 const IMMINENT_TICK_SECONDS = 10 * 60;
 const CRITICAL_TICK_SECONDS = 90;
+const BURN_OIL_ACTION_ID = '4';
+const BURN_OIL_UNITS_PER_ACTION = 5;
+const BURN_OIL_SAT_PER_ACTION = 5;
+
+export function burnOilOutcome(times, satisfaction) {
+    if (!Number.isSafeInteger(times) || times < 1 || !Number.isFinite(satisfaction)) return null;
+    const oilBurned = times * BURN_OIL_UNITS_PER_ACTION;
+    const satisfactionLost = times * BURN_OIL_SAT_PER_ACTION;
+    const satisfactionAfter = satisfaction - satisfactionLost;
+    if (![oilBurned, satisfactionLost, satisfactionAfter].every(Number.isSafeInteger)) return null;
+    return {
+        times,
+        oilBurned,
+        satisfactionBefore: satisfaction,
+        satisfactionLost,
+        satisfactionAfter,
+    };
+}
 
 export const actionsModule = {
     name: 'actions',
@@ -23,8 +43,8 @@ export const actionsModule = {
     settings(core) {
         core.settings.define({
             key: SETTING_KEY,
-            label: 'Confirm actions that endanger upkeep',
-            description: 'Before performing a known Action or Favorite Action, check whether its immediate costs or resulting upkeep would leave a resource below its protected reserve.',
+            label: 'Confirm risky actions',
+            description: 'Before performing a known Action or Favorite Action, check protected upkeep and satisfaction risks.',
             type: 'bool',
             default: true,
             section: 'Actions',
@@ -43,6 +63,13 @@ export const actionsModule = {
             .clop-action-compat-warning { margin: 8px 0; padding: 7px 9px; text-align: left; font-size: 90%; }
             .clop-action-compat-warning a, #clop-action-compat-summary a { font-weight: bold; }
             .clop-action-tick-critical { border-width: 2px; font-size: 105%; }
+            .clop-burn-oil-warning { clear: both; display: none; margin: 6px 0 4px; padding: 6px 8px; text-align: left; font-size: 90%; line-height: 1.4; }
+            .clop-burn-oil-warning.clop-active { display: block; }
+            .clop-action-satisfaction-title { display: block; margin-bottom: 8px; }
+            .clop-action-satisfaction-summary { display: grid; grid-template-columns: max-content 1fr; gap: 3px 12px; }
+            .clop-action-satisfaction-summary strong { font-size: 110%; }
+            .clop-action-collapse-risk { border-width: 2px; }
+            .clop-burn-oil-risk-suggestion { margin-top: 8px; }
             form.clop-action-checking { opacity: .7; pointer-events: none; }
         `);
 
@@ -105,6 +132,70 @@ export const actionsModule = {
             }
         }
 
+        function annotateBurnOil(record, state) {
+            if (record.id !== BURN_OIL_ACTION_ID || state.status !== 'verified') return;
+            const input = record.form.querySelector('input[name="times"][type="text"]');
+            if (!input || record.form.querySelector('.clop-burn-oil-warning')) return;
+
+            const totalLine = el('div');
+            const warning = el('div', {
+                class: 'alert alert-warning clop-burn-oil-warning',
+                'aria-hidden': 'true',
+            }, [
+                el('div', {}, [
+                    '⚠ Remember ', el('strong', {}, ['1 action']), ' burns ',
+                    el('strong', {}, ['5 oil']), '!',
+                ]),
+                totalLine,
+            ]);
+
+            function update() {
+                const times = phpInteger(input.value);
+                const total = times * BURN_OIL_UNITS_PER_ACTION;
+                if (!Number.isSafeInteger(times) || times < 1 || !Number.isSafeInteger(total)) {
+                    totalLine.textContent = 'Enter a whole-number action quantity to see the total.';
+                    return;
+                }
+                const amount = core.commas(total);
+                totalLine.replaceChildren(
+                    el('strong', {}, [core.commas(times)]),
+                    ` action${times === 1 ? '' : 's'} will burn `,
+                    el('strong', {}, [amount]),
+                    ' oil and lose ',
+                    el('strong', {}, [amount]),
+                    ' satisfaction.',
+                );
+            }
+
+            const row = input.closest('.form-inline');
+            if (row) row.insertAdjacentElement('afterend', warning);
+            else input.insertAdjacentElement('afterend', warning);
+            const initialValue = input.value;
+            let focused = false;
+            let editedFromDefault = false;
+
+            function setVisible(visible) {
+                warning.classList.toggle('clop-active', visible);
+                warning.setAttribute('aria-hidden', visible ? 'false' : 'true');
+            }
+
+            input.addEventListener('input', () => {
+                update();
+                if (focused && input.value !== initialValue) editedFromDefault = true;
+                setVisible(focused || editedFromDefault);
+            });
+            input.addEventListener('focus', () => {
+                focused = true;
+                update();
+                setVisible(true);
+            });
+            input.addEventListener('blur', () => {
+                focused = false;
+                setVisible(editedFromDefault);
+            });
+            update();
+        }
+
         function renderSummary() {
             document.querySelector('#clop-action-compat-summary')?.remove();
             const affected = [...states.values()].filter((state) =>
@@ -152,8 +243,7 @@ export const actionsModule = {
             const imminent = el('div', { class: 'alert alert-warning', style: 'display:none;' }, [
                 imminentHeadline,
                 el('div', {}, [
-                    'Consider waiting until after the tick, or make absolutely certain you can ' +
-                    'top up the affected stockpiles in time.',
+                    'Wait until afterwards, or be ready to remedy the highlighted risk before then.',
                 ]),
             ]);
             const critical = el('div', {
@@ -162,22 +252,24 @@ export const actionsModule = {
             }, [
                 el('strong', {}, ['TICK IS ABOUT TO HAPPEN']),
                 el('div', {}, [
-                    'If you proceed and do not fix your upkeep within ', criticalSeconds,
-                    ', your affected buildings will stall.',
+                    'Do not proceed unless you can remedy the highlighted risk within ', criticalSeconds, '.',
                 ]),
             ]);
             const bodyChildren = Array.isArray(options.body) ? options.body : [options.body];
-            const body = el('div', {}, [imminent, critical, ...bodyChildren]);
+            const body = el('div', {}, bodyChildren.length
+                ? [bodyChildren[0], imminent, critical, ...bodyChildren.slice(1)]
+                : [imminent, critical]);
 
             function updateTickWarnings() {
                 const untilTick = tickSecondsFromDocument(document);
-                const showImminent = tickIsImminent(untilTick, IMMINENT_TICK_SECONDS);
-                const showCritical = tickIsCritical(untilTick, CRITICAL_TICK_SECONDS);
+                const tickRelevant = options.tickRelevant !== false;
+                const showCritical = tickRelevant && tickIsCritical(untilTick, CRITICAL_TICK_SECONDS);
+                const showImminent = tickRelevant && !showCritical
+                    && tickIsImminent(untilTick, IMMINENT_TICK_SECONDS);
                 imminent.style.display = showImminent ? '' : 'none';
                 critical.style.display = showCritical ? '' : 'none';
                 if (showImminent) {
-                    imminentHeadline.textContent =
-                        `Next tick is imminent — ${formatTickDuration(untilTick)} remaining.`;
+                    imminentHeadline.textContent = `Next tick in ${formatTickDuration(untilTick)}.`;
                 }
                 if (showCritical) {
                     criticalSeconds.textContent =
@@ -228,7 +320,11 @@ export const actionsModule = {
             return true;
         }
 
-        function riskConfirmation(action, times, risks) {
+        function signed(value) {
+            return value > 0 ? `+${core.commas(value)}` : core.commas(value);
+        }
+
+        function riskConfirmation(action, times, risks, satisfactionProjection, burnOil = null) {
             const quantity = times === 1 ? action.name : `${action.name} × ${core.commas(times)}`;
             const lines = risks.map((risk) => {
                 const stock = `stock ${core.commas(risk.stockBefore)} → ${core.commas(risk.stockAfter)}`;
@@ -237,17 +333,107 @@ export const actionsModule = {
                     : `reserve ${core.commas(risk.reserveBefore)} → ${core.commas(risk.reserveAfter)}`;
                 return `• ${risk.name}: ${stock}; ${reserve}; short by ${core.commas(risk.shortage)}`;
             });
-            return actionConfirm({
-                title: 'Upkeep reserve at risk',
-                body: [
+            const body = [];
+            const hazard = satisfactionProjection && satisfactionProjection.hazard;
+            if (hazard) {
+                const collapse = hazard === 'collapse';
+                const headline = collapse
+                    ? `THIS ${burnOil ? 'BURN' : 'ACTION'} WILL DESTROY YOUR NATION ON THE NEXT TICK IF NOT REMEDIED!`
+                    : `This ${burnOil ? 'burn' : 'action'} will create rebels on the next tick if not remedied!`;
+                const summary = [
+                    el('strong', { class: 'clop-action-satisfaction-title' }, [headline]),
+                ];
+
+                if (burnOil) {
+                    summary.push(el('div', { class: 'clop-action-satisfaction-summary' }, [
+                        el('span', {}, ['You selected to burn:']),
+                        el('span', {}, [
+                            el('strong', {}, [core.commas(burnOil.oilBurned)]),
+                            ` oil (burn ${core.commas(burnOil.times)} time${burnOil.times === 1 ? '' : 's'})`,
+                        ]),
+                        el('span', {}, ['Outcome:']),
+                        el('span', {}, [
+                            el('strong', {}, [core.commas(satisfactionProjection.satisfactionAfter)]),
+                            ' satisfaction',
+                        ]),
+                        el('span', {}, ['Next tick:']),
+                        el('span', {}, [
+                            el('strong', {}, [core.commas(satisfactionProjection.nextTickSatisfaction)]),
+                            ` satisfaction (currently ${signed(satisfactionProjection.perTickAfter)}/tick)`,
+                        ]),
+                    ]));
+                } else {
+                    summary.push(el('div', { class: 'clop-action-satisfaction-summary' }, [
+                        el('span', {}, ['Outcome:']),
+                        el('span', {}, [
+                            el('strong', {}, [core.commas(satisfactionProjection.satisfactionAfter)]),
+                            ' satisfaction',
+                        ]),
+                        el('span', {}, ['Next tick:']),
+                        el('span', {}, [
+                            el('strong', {}, [core.commas(satisfactionProjection.nextTickSatisfaction)]),
+                            ` satisfaction (projected ${signed(satisfactionProjection.perTickAfter)}/tick)`,
+                        ]),
+                    ]));
+                }
+
+                if (burnOil) {
+                    const suggestedTimes = burnOil.times % BURN_OIL_UNITS_PER_ACTION === 0
+                        ? burnOil.times / BURN_OIL_UNITS_PER_ACTION
+                        : null;
+                    if (suggestedTimes) {
+                        summary.push(el('div', { class: 'clop-burn-oil-risk-suggestion' }, [
+                            'Did you mean to burn ', el('strong', {}, [core.commas(suggestedTimes)]),
+                            ` time${suggestedTimes === 1 ? '' : 's'} instead?`,
+                        ]));
+                    }
+                }
+
+                body.push(el('div', {
+                    class: `alert alert-danger${collapse ? ' clop-action-collapse-risk' : ''}`,
+                }, summary));
+                if (burnOil) {
+                    body.push(el('div', { class: 'alert alert-warning' }, [
+                        '⚠ Remember: ', el('strong', {}, ['1 action burns 5 oil.']),
+                        ' Divide the oil you intend to burn by 5 before entering the action count.',
+                    ]));
+                }
+            } else if (satisfactionProjection && satisfactionProjection.trendRisk) {
+                const heading = satisfactionProjection.perTickBefore >= 0
+                    ? 'This action would make satisfaction decrease each tick.'
+                    : 'This action would make the existing satisfaction decline worse.';
+                body.push(el('div', { class: 'alert alert-warning' }, [
+                    el('strong', { class: 'clop-action-satisfaction-title' }, [heading]),
+                    el('div', { class: 'clop-action-satisfaction-summary' }, [
+                        el('span', {}, ['Satisfaction/tick:']),
+                        el('span', {}, [
+                            el('strong', {}, [signed(satisfactionProjection.perTickBefore)]),
+                            ' → ', el('strong', {}, [signed(satisfactionProjection.perTickAfter)]),
+                        ]),
+                    ]),
+                ]));
+            }
+            if (risks.length) {
+                body.push(
                     el('div', { class: 'alert alert-warning' }, [
                         el('strong', {}, [`${quantity} would leave insufficient stock `]),
                         'for the protected upkeep reserve.',
                     ]),
                     el('ul', { class: 'clop-confirm-risk-list' }, lines.map((line) =>
                         el('li', {}, [line.replace(/^•\s*/, '')]))),
-                ],
-                confirmLabel: 'Perform anyway',
+                );
+            }
+            let title = 'Upkeep reserve at risk';
+            if (hazard === 'collapse') title = 'Nation collapse risk';
+            else if (hazard === 'rebels') title = 'Rebel risk';
+            else if (satisfactionProjection && satisfactionProjection.trendRisk) {
+                title = risks.length ? 'Satisfaction and upkeep at risk' : 'Satisfaction declining';
+            }
+            return actionConfirm({
+                title,
+                body,
+                confirmLabel: burnOil ? 'Burn anyway' : 'Perform anyway',
+                tickRelevant: !!hazard || risks.length > 0,
             });
         }
 
@@ -304,7 +490,7 @@ export const actionsModule = {
                         })) submitNatively(record.form);
                         return;
                     }
-                    if (!actionNeedsSafetyCheck(state.expected, BUILDING_UPKEEP)) {
+                    if (!actionNeedsSafetyCheck(state.expected, BUILDING_UPKEEP, BUILDING_EFFECTS)) {
                         submitNatively(record.form);
                         return;
                     }
@@ -328,7 +514,16 @@ export const actionsModule = {
                     }
                     const risks = projectActionRisks(
                         state.expected, submission.times, stats, BUILDING_UPKEEP);
-                    if (!risks.length || await riskConfirmation(state.expected, submission.times, risks)) {
+                    const satisfactionProjection = projectActionSatisfaction(
+                        state.expected, submission.times, stats, BUILDING_EFFECTS);
+                    const burnOil = record.id === BURN_OIL_ACTION_ID
+                        ? burnOilOutcome(submission.times, stats.satisfaction)
+                        : null;
+                    const satisfactionRisk = satisfactionProjection
+                        && (satisfactionProjection.hazard || satisfactionProjection.trendRisk);
+                    if ((!risks.length && !satisfactionRisk)
+                        || await riskConfirmation(
+                            state.expected, submission.times, risks, satisfactionProjection, burnOil)) {
                         submitNatively(record.form);
                     }
                 } finally {
@@ -339,7 +534,11 @@ export const actionsModule = {
 
         actualActionsPromise.then((actualActions) => {
             if (!actualActions) return;
-            for (const record of forms) annotateForm(record, stateFor(record.id, actualActions));
+            for (const record of forms) {
+                const state = stateFor(record.id, actualActions);
+                annotateForm(record, state);
+                annotateBurnOil(record, state);
+            }
             renderSummary();
         });
     },

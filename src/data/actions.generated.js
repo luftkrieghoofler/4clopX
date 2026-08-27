@@ -12,6 +12,7 @@ export const ACTION_CATALOG = {
             "isBuilding": true,
             "amount": 1
         },
+        "satisfaction": 0,
         "items": []
     },
     "2": {
@@ -23,6 +24,7 @@ export const ACTION_CATALOG = {
             "isBuilding": true,
             "amount": 1
         },
+        "satisfaction": 0,
         "items": []
     },
     "3": {
@@ -34,6 +36,7 @@ export const ACTION_CATALOG = {
             "isBuilding": true,
             "amount": 1
         },
+        "satisfaction": 0,
         "items": []
     },
     "4": {
@@ -45,6 +48,7 @@ export const ACTION_CATALOG = {
             "isBuilding": false,
             "amount": 5
         },
+        "satisfaction": -5,
         "items": [
             {
                 "resourceId": 1,
@@ -64,6 +68,7 @@ export const ACTION_CATALOG = {
             "isBuilding": true,
             "amount": 1
         },
+        "satisfaction": 0,
         "items": [
             {
                 "resourceId": 4,
@@ -90,6 +95,7 @@ export const ACTION_CATALOG = {
             "isBuilding": false,
             "amount": 1
         },
+        "satisfaction": 0,
         "items": [
             {
                 "resourceId": 2,
@@ -123,6 +129,7 @@ export const ACTION_CATALOG = {
             "isBuilding": false,
             "amount": 1
         },
+        "satisfaction": 0,
         "items": [
             {
                 "resourceId": 2,
@@ -151,6 +158,7 @@ export const ACTION_CATALOG = {
         "name": "Distribute Apples",
         "description": "Distributing apples to your little ponies is highly inefficient, but at least it gets the job done. Distribute 5 apples for 3 satisfaction.",
         "output": null,
+        "satisfaction": 3,
         "items": [
             {
                 "resourceId": 3,
@@ -165,6 +173,7 @@ export const ACTION_CATALOG = {
         "name": "Distribute Pies",
         "description": "Distribute 1 large box of pies to your little ponies to raise their satisfaction by 2.",
         "output": null,
+        "satisfaction": 2,
         "items": [
             {
                 "resourceId": 13,
@@ -184,6 +193,7 @@ export const ACTION_CATALOG = {
             "isBuilding": true,
             "amount": 1
         },
+        "satisfaction": 5,
         "items": [
             {
                 "resourceId": 6,
@@ -224,6 +234,7 @@ export const ACTION_CATALOG = {
             "isBuilding": true,
             "amount": 1
         },
+        "satisfaction": 5,
         "items": [
             {
                 "resourceId": 7,
@@ -264,6 +275,7 @@ export const ACTION_CATALOG = {
             "isBuilding": true,
             "amount": 1
         },
+        "satisfaction": 5,
         "items": [
             {
                 "resourceId": 8,
@@ -297,6 +309,7 @@ export const ACTION_CATALOG = {
             "isBuilding": true,
             "amount": 1
         },
+        "satisfaction": 2,
         "items": [
             {
                 "resourceId": 2,
@@ -337,6 +350,7 @@ export const ACTION_CATALOG = {
             "isBuilding": true,
             "amount": 1
         },
+        "satisfaction": 0,
         "items": [
             {
                 "resourceId": 2,
@@ -358,6 +372,7 @@ export const ACTION_CATALOG = {
         "name": "Distribute Money",
         "description": "Spend 100,000 bits to get a measly 1 satisfaction. This is probably the worst use of money possible and won't work in the long run, but if you're desperately trying to stave off losing your country...",
         "output": null,
+        "satisfaction": 1,
         "items": []
     },
     "16": {
@@ -369,6 +384,7 @@ export const ACTION_CATALOG = {
             "isBuilding": true,
             "amount": 1
         },
+        "satisfaction": 0,
         "items": [
             {
                 "resourceId": 2,
@@ -402,6 +418,7 @@ export const ACTION_CATALOG = {
             "isBuilding": true,
             "amount": 1
         },
+        "satisfaction": 0,
         "items": [
             {
                 "resourceId": 9,
@@ -428,6 +445,7 @@ export const ACTION_CATALOG = {
             "isBuilding": true,
             "amount": 1
         },
+        "satisfaction": 5,
         "items": [
             {
                 "resourceId": 2,
@@ -447,6 +465,7 @@ export const ACTION_CATALOG = {
             "isBuilding": true,
             "amount": 1
         },
+        "satisfaction": 5,
         "items": [
             {
                 "resourceId": 2,
@@ -466,6 +485,7 @@ export const ACTION_CATALOG = {
             "isBuilding": true,
             "amount": 1
         },
+        "satisfaction": 0,
         "items": [
             {
                 "resourceId": 2,
@@ -506,6 +526,7 @@ export const ACTION_CATALOG = {
             "isBuilding": true,
             "amount": 1
         },
+        "satisfaction": 5,
         "items": [
             {
                 "resourceId": 11,
@@ -539,6 +560,7 @@ export const ACTION_CATALOG = {
             "isBuilding": true,
             "amount": 1
         },
+        "satisfaction": 0,
         "items": [
             {
                 "resourceId": 2,
@@ -565,6 +587,7 @@ export const ACTION_CATALOG = {
             "isBuilding": true,
             "amount": 1
         },
+        "satisfaction": 0,
         "items": [
             {
                 "resourceId": 29,
@@ -598,6 +621,7 @@ export const ACTION_CATALOG = {
             "isBuilding": true,
             "amount": 1
         },
+        "satisfaction": 20,
         "items": [
             {
                 "resourceId": 4,
@@ -638,6 +662,7 @@ export const ACTION_CATALOG = {
             "isBuilding": true,
             "amount": 1
         },
+        "satisfaction": 0,
         "items": [
             {
                 "resourceId": 30,
@@ -678,6 +703,7 @@ export const ACTION_CATALOG = {
             "isBuilding": false,
             "amount": 1
         },
+        "satisfaction": 0,
         "items": [
             {
                 "resourceId": 31,
@@ -711,6 +737,7 @@ export const ACTION_CATALOG = {
             "isBuilding": false,
             "amount": 1
         },
+        "satisfaction": 0,
         "items": [
             {
                 "resourceId": 31,
@@ -744,6 +771,7 @@ export const ACTION_CATALOG = {
             "isBuilding": true,
             "amount": 1
         },
+        "satisfaction": 0,
         "items": [
             {
                 "resourceId": 9,
@@ -777,6 +805,7 @@ export const ACTION_CATALOG = {
             "isBuilding": true,
             "amount": 1
         },
+        "satisfaction": 0,
         "items": [
             {
                 "resourceId": 2,
@@ -817,6 +846,7 @@ export const ACTION_CATALOG = {
             "isBuilding": true,
             "amount": 1
         },
+        "satisfaction": 5,
         "items": [
             {
                 "resourceId": 4,
@@ -843,6 +873,7 @@ export const ACTION_CATALOG = {
             "isBuilding": true,
             "amount": 1
         },
+        "satisfaction": 50,
         "items": [
             {
                 "resourceId": 2,
@@ -857,6 +888,7 @@ export const ACTION_CATALOG = {
         "name": "Ship Oil to the Solar Empire",
         "description": "Send 8 oil to the Solar Empire to better your relationship with it by 1.",
         "output": null,
+        "satisfaction": 0,
         "items": [
             {
                 "resourceId": 1,
@@ -871,6 +903,7 @@ export const ACTION_CATALOG = {
         "name": "Ship Oil to the New Lunar Republic",
         "description": "Send 8 oil to the New Lunar Republic to better your relationship with it by 1.",
         "output": null,
+        "satisfaction": 0,
         "items": [
             {
                 "resourceId": 1,
@@ -890,6 +923,7 @@ export const ACTION_CATALOG = {
             "isBuilding": true,
             "amount": 1
         },
+        "satisfaction": 0,
         "items": [
             {
                 "resourceId": 2,
@@ -916,6 +950,7 @@ export const ACTION_CATALOG = {
             "isBuilding": true,
             "amount": 1
         },
+        "satisfaction": 0,
         "items": [
             {
                 "resourceId": 2,
@@ -942,12 +977,14 @@ export const ACTION_CATALOG = {
             "isBuilding": true,
             "amount": 1
         },
+        "satisfaction": 0,
         "items": []
     },
     "37": {
         "name": "Smuggle Drugs into the SE",
         "description": "Smuggle drugs into the Solar Empire to gain 20,000 bits. You will lose 1 relationship with the Solar Empire for doing this (but that might be why you did...) You cannot do this if your relationship with the Solar Empire is below -500 or if your nation is younger than a week.",
         "output": null,
+        "satisfaction": 0,
         "items": [
             {
                 "resourceId": 42,
@@ -962,6 +999,7 @@ export const ACTION_CATALOG = {
         "name": "Smuggle Drugs into the NLR",
         "description": "Smuggle drugs into the New Lunar Republic to gain 20,000 bits. You will lose 1 relationship with the New Lunar Republic for doing this (but that might be why you did...) You cannot do this if your relationship with the New Lunar Republic is below -500 or if your nation is younger than a week.",
         "output": null,
+        "satisfaction": 0,
         "items": [
             {
                 "resourceId": 42,
@@ -981,6 +1019,7 @@ export const ACTION_CATALOG = {
             "isBuilding": true,
             "amount": 1
         },
+        "satisfaction": 0,
         "items": [
             {
                 "resourceId": 2,
@@ -1014,6 +1053,7 @@ export const ACTION_CATALOG = {
             "isBuilding": true,
             "amount": 1
         },
+        "satisfaction": 0,
         "items": [
             {
                 "resourceId": 2,
@@ -1047,6 +1087,7 @@ export const ACTION_CATALOG = {
             "isBuilding": true,
             "amount": 1
         },
+        "satisfaction": 0,
         "items": [
             {
                 "resourceId": 2,
@@ -1080,6 +1121,7 @@ export const ACTION_CATALOG = {
             "isBuilding": true,
             "amount": 1
         },
+        "satisfaction": 10,
         "items": [
             {
                 "resourceId": 2,
@@ -1099,6 +1141,7 @@ export const ACTION_CATALOG = {
             "isBuilding": true,
             "amount": 1
         },
+        "satisfaction": 100,
         "items": [
             {
                 "resourceId": 2,
@@ -1139,6 +1182,7 @@ export const ACTION_CATALOG = {
             "isBuilding": true,
             "amount": 1
         },
+        "satisfaction": 0,
         "items": []
     },
     "46": {
@@ -1150,6 +1194,7 @@ export const ACTION_CATALOG = {
             "isBuilding": true,
             "amount": 1
         },
+        "satisfaction": 0,
         "items": []
     },
     "47": {
@@ -1161,6 +1206,7 @@ export const ACTION_CATALOG = {
             "isBuilding": true,
             "amount": 1
         },
+        "satisfaction": 0,
         "items": []
     },
     "48": {
@@ -1172,6 +1218,7 @@ export const ACTION_CATALOG = {
             "isBuilding": true,
             "amount": 1
         },
+        "satisfaction": 0,
         "items": []
     },
     "49": {
@@ -1183,6 +1230,7 @@ export const ACTION_CATALOG = {
             "isBuilding": true,
             "amount": 1
         },
+        "satisfaction": 0,
         "items": []
     },
     "50": {
@@ -1194,6 +1242,7 @@ export const ACTION_CATALOG = {
             "isBuilding": true,
             "amount": 1
         },
+        "satisfaction": 0,
         "items": []
     },
     "51": {
@@ -1205,6 +1254,7 @@ export const ACTION_CATALOG = {
             "isBuilding": true,
             "amount": 1
         },
+        "satisfaction": 0,
         "items": []
     },
     "52": {
@@ -1216,6 +1266,7 @@ export const ACTION_CATALOG = {
             "isBuilding": true,
             "amount": 1
         },
+        "satisfaction": 0,
         "items": []
     },
     "53": {
@@ -1227,6 +1278,7 @@ export const ACTION_CATALOG = {
             "isBuilding": true,
             "amount": 1
         },
+        "satisfaction": 0,
         "items": []
     },
     "54": {
@@ -1238,6 +1290,7 @@ export const ACTION_CATALOG = {
             "isBuilding": true,
             "amount": 1
         },
+        "satisfaction": 0,
         "items": []
     },
     "55": {
@@ -1249,6 +1302,7 @@ export const ACTION_CATALOG = {
             "isBuilding": true,
             "amount": 1
         },
+        "satisfaction": 0,
         "items": []
     },
     "56": {
@@ -1260,6 +1314,7 @@ export const ACTION_CATALOG = {
             "isBuilding": true,
             "amount": 1
         },
+        "satisfaction": 0,
         "items": []
     },
     "57": {
@@ -1271,6 +1326,7 @@ export const ACTION_CATALOG = {
             "isBuilding": true,
             "amount": 1
         },
+        "satisfaction": 0,
         "items": [
             {
                 "resourceId": 2,
@@ -1304,6 +1360,7 @@ export const ACTION_CATALOG = {
             "isBuilding": true,
             "amount": 1
         },
+        "satisfaction": 0,
         "items": []
     },
     "59": {
@@ -1315,6 +1372,7 @@ export const ACTION_CATALOG = {
             "isBuilding": true,
             "amount": 1
         },
+        "satisfaction": 0,
         "items": []
     },
     "60": {
@@ -1326,6 +1384,7 @@ export const ACTION_CATALOG = {
             "isBuilding": true,
             "amount": 1
         },
+        "satisfaction": 0,
         "items": []
     },
     "61": {
@@ -1337,6 +1396,7 @@ export const ACTION_CATALOG = {
             "isBuilding": true,
             "amount": 1
         },
+        "satisfaction": 10,
         "items": [
             {
                 "resourceId": 34,
@@ -1372,6 +1432,7 @@ export const ACTION_CATALOG = {
         "name": "Ship Tungsten to the Solar Empire",
         "description": "Send 8 tungsten to the Solar Empire to better your relationship with it by 1.",
         "output": null,
+        "satisfaction": 0,
         "items": [
             {
                 "resourceId": 27,
@@ -1386,6 +1447,7 @@ export const ACTION_CATALOG = {
         "name": "Ship Tungsten to the New Lunar Republic",
         "description": "Send 8 tungsten to the New Lunar Republic to better your relationship with it by 1.",
         "output": null,
+        "satisfaction": 0,
         "items": [
             {
                 "resourceId": 27,
@@ -1854,6 +1916,393 @@ export const BUILDING_UPKEEP = {
             "amount": 1
         }
     ]
+};
+
+export const BUILDING_EFFECTS = {
+    "5": {
+        "resourceId": 5,
+        "name": "Basic Factory",
+        "satisfaction": -1,
+        "badMin": 20,
+        "badDiv": 10,
+        "environmentalCleaner": false
+    },
+    "6": {
+        "resourceId": 6,
+        "name": "Basic Oil Well",
+        "satisfaction": -2,
+        "badMin": 10,
+        "badDiv": 10,
+        "environmentalCleaner": false
+    },
+    "7": {
+        "resourceId": 7,
+        "name": "Basic Copper Mine",
+        "satisfaction": -2,
+        "badMin": 10,
+        "badDiv": 10,
+        "environmentalCleaner": false
+    },
+    "8": {
+        "resourceId": 8,
+        "name": "Basic Apple Orchard",
+        "satisfaction": -2,
+        "badMin": 10,
+        "badDiv": 10,
+        "environmentalCleaner": false
+    },
+    "11": {
+        "resourceId": 11,
+        "name": "Oil Combustion Facility",
+        "satisfaction": -2,
+        "badMin": 5,
+        "badDiv": 5,
+        "environmentalCleaner": false
+    },
+    "12": {
+        "resourceId": 12,
+        "name": "Bakery",
+        "satisfaction": 1,
+        "badMin": 0,
+        "badDiv": 0,
+        "environmentalCleaner": false
+    },
+    "14": {
+        "resourceId": 14,
+        "name": "Mechanized Oil Well",
+        "satisfaction": -1,
+        "badMin": 20,
+        "badDiv": 5,
+        "environmentalCleaner": false
+    },
+    "15": {
+        "resourceId": 15,
+        "name": "Mechanized Copper Mine",
+        "satisfaction": -1,
+        "badMin": 20,
+        "badDiv": 5,
+        "environmentalCleaner": false
+    },
+    "16": {
+        "resourceId": 16,
+        "name": "Mechanized Apple Orchard",
+        "satisfaction": -1,
+        "badMin": 20,
+        "badDiv": 5,
+        "environmentalCleaner": false
+    },
+    "17": {
+        "resourceId": 17,
+        "name": "Cider Production Facility",
+        "satisfaction": 0,
+        "badMin": 0,
+        "badDiv": 0,
+        "environmentalCleaner": false
+    },
+    "19": {
+        "resourceId": 19,
+        "name": "Coffee Farm",
+        "satisfaction": -1,
+        "badMin": 15,
+        "badDiv": 10,
+        "environmentalCleaner": false
+    },
+    "21": {
+        "resourceId": 21,
+        "name": "Coffee Shop",
+        "satisfaction": 10,
+        "badMin": 0,
+        "badDiv": 0,
+        "environmentalCleaner": false
+    },
+    "22": {
+        "resourceId": 22,
+        "name": "Bar",
+        "satisfaction": 10,
+        "badMin": 0,
+        "badDiv": 0,
+        "environmentalCleaner": false
+    },
+    "23": {
+        "resourceId": 23,
+        "name": "Gasoline Refinery",
+        "satisfaction": 0,
+        "badMin": 0,
+        "badDiv": 0,
+        "environmentalCleaner": false
+    },
+    "24": {
+        "resourceId": 24,
+        "name": "Gasoline Combustion Facility",
+        "satisfaction": 0,
+        "badMin": 0,
+        "badDiv": 0,
+        "environmentalCleaner": false
+    },
+    "31": {
+        "resourceId": 31,
+        "name": "Advanced Factory",
+        "satisfaction": -1,
+        "badMin": 5,
+        "badDiv": 5,
+        "environmentalCleaner": false
+    },
+    "32": {
+        "resourceId": 32,
+        "name": "Gem Mine",
+        "satisfaction": -1,
+        "badMin": 7,
+        "badDiv": 5,
+        "environmentalCleaner": false
+    },
+    "33": {
+        "resourceId": 33,
+        "name": "Tungsten Mine",
+        "satisfaction": -1,
+        "badMin": 7,
+        "badDiv": 5,
+        "environmentalCleaner": false
+    },
+    "34": {
+        "resourceId": 34,
+        "name": "Plastics Factory",
+        "satisfaction": -1,
+        "badMin": 7,
+        "badDiv": 5,
+        "environmentalCleaner": false
+    },
+    "35": {
+        "resourceId": 35,
+        "name": "Oil Fracker",
+        "satisfaction": -2,
+        "badMin": 5,
+        "badDiv": 5,
+        "environmentalCleaner": false
+    },
+    "36": {
+        "resourceId": 36,
+        "name": "Barracks",
+        "satisfaction": 0,
+        "badMin": 1,
+        "badDiv": 1,
+        "environmentalCleaner": false
+    },
+    "37": {
+        "resourceId": 37,
+        "name": "Video Arcade",
+        "satisfaction": 10,
+        "badMin": 0,
+        "badDiv": 0,
+        "environmentalCleaner": false
+    },
+    "38": {
+        "resourceId": 38,
+        "name": "Statue",
+        "satisfaction": 1,
+        "badMin": 0,
+        "badDiv": 0,
+        "environmentalCleaner": false
+    },
+    "39": {
+        "resourceId": 39,
+        "name": "Sun Worship Center",
+        "satisfaction": 0,
+        "badMin": 0,
+        "badDiv": 0,
+        "environmentalCleaner": false
+    },
+    "40": {
+        "resourceId": 40,
+        "name": "Moon Worship Center",
+        "satisfaction": 0,
+        "badMin": 0,
+        "badDiv": 0,
+        "environmentalCleaner": false
+    },
+    "41": {
+        "resourceId": 41,
+        "name": "Drug Farm",
+        "satisfaction": 0,
+        "badMin": 0,
+        "badDiv": 0,
+        "environmentalCleaner": false
+    },
+    "44": {
+        "resourceId": 44,
+        "name": "Solar Environmental Facility",
+        "satisfaction": 0,
+        "badMin": 0,
+        "badDiv": 0,
+        "environmentalCleaner": true
+    },
+    "45": {
+        "resourceId": 45,
+        "name": "Lunar Environmental Facility",
+        "satisfaction": 0,
+        "badMin": 0,
+        "badDiv": 0,
+        "environmentalCleaner": true
+    },
+    "46": {
+        "resourceId": 46,
+        "name": "Toy Factory",
+        "satisfaction": 0,
+        "badMin": 0,
+        "badDiv": 0,
+        "environmentalCleaner": false
+    },
+    "48": {
+        "resourceId": 48,
+        "name": "Toy and Candy Shop",
+        "satisfaction": 30,
+        "badMin": 0,
+        "badDiv": 0,
+        "environmentalCleaner": false
+    },
+    "49": {
+        "resourceId": 49,
+        "name": "Mall",
+        "satisfaction": 50,
+        "badMin": 0,
+        "badDiv": 0,
+        "environmentalCleaner": false
+    },
+    "50": {
+        "resourceId": 50,
+        "name": "DNA Extraction Facility - N. SA",
+        "satisfaction": 0,
+        "badMin": 1,
+        "badDiv": 1,
+        "environmentalCleaner": false
+    },
+    "51": {
+        "resourceId": 51,
+        "name": "DNA Extraction Facility - C. SA",
+        "satisfaction": 0,
+        "badMin": 1,
+        "badDiv": 1,
+        "environmentalCleaner": false
+    },
+    "52": {
+        "resourceId": 52,
+        "name": "DNA Extraction Facility - S. SA",
+        "satisfaction": 0,
+        "badMin": 1,
+        "badDiv": 1,
+        "environmentalCleaner": false
+    },
+    "53": {
+        "resourceId": 53,
+        "name": "DNA Extraction Facility - N. Zebrica",
+        "satisfaction": 0,
+        "badMin": 1,
+        "badDiv": 1,
+        "environmentalCleaner": false
+    },
+    "54": {
+        "resourceId": 54,
+        "name": "DNA Extraction Facility - C. Zebrica",
+        "satisfaction": 0,
+        "badMin": 1,
+        "badDiv": 1,
+        "environmentalCleaner": false
+    },
+    "55": {
+        "resourceId": 55,
+        "name": "DNA Extraction Facility - S. Zebrica",
+        "satisfaction": 0,
+        "badMin": 1,
+        "badDiv": 1,
+        "environmentalCleaner": false
+    },
+    "56": {
+        "resourceId": 56,
+        "name": "DNA Extraction Facility - N. Burrozil",
+        "satisfaction": 0,
+        "badMin": 1,
+        "badDiv": 1,
+        "environmentalCleaner": false
+    },
+    "57": {
+        "resourceId": 57,
+        "name": "DNA Extraction Facility - C. Burrozil",
+        "satisfaction": 0,
+        "badMin": 1,
+        "badDiv": 1,
+        "environmentalCleaner": false
+    },
+    "58": {
+        "resourceId": 58,
+        "name": "DNA Extraction Facility - S. Burrozil",
+        "satisfaction": 0,
+        "badMin": 1,
+        "badDiv": 1,
+        "environmentalCleaner": false
+    },
+    "59": {
+        "resourceId": 59,
+        "name": "DNA Extraction Facility - N. Prze",
+        "satisfaction": 0,
+        "badMin": 1,
+        "badDiv": 1,
+        "environmentalCleaner": false
+    },
+    "60": {
+        "resourceId": 60,
+        "name": "DNA Extraction Facility - C. Prze",
+        "satisfaction": 0,
+        "badMin": 1,
+        "badDiv": 1,
+        "environmentalCleaner": false
+    },
+    "61": {
+        "resourceId": 61,
+        "name": "DNA Extraction Facility - S. Prze",
+        "satisfaction": 0,
+        "badMin": 1,
+        "badDiv": 1,
+        "environmentalCleaner": false
+    },
+    "74": {
+        "resourceId": 74,
+        "name": "Forbidden Research Facility",
+        "satisfaction": 0,
+        "badMin": 0,
+        "badDiv": 0,
+        "environmentalCleaner": false
+    },
+    "76": {
+        "resourceId": 76,
+        "name": "Alicornification Facility",
+        "satisfaction": 0,
+        "badMin": 0,
+        "badDiv": 0,
+        "environmentalCleaner": false
+    },
+    "78": {
+        "resourceId": 78,
+        "name": "Solar Collector",
+        "satisfaction": 0,
+        "badMin": 0,
+        "badDiv": 0,
+        "environmentalCleaner": false
+    },
+    "79": {
+        "resourceId": 79,
+        "name": "Tidal Generator",
+        "satisfaction": 0,
+        "badMin": 0,
+        "badDiv": 0,
+        "environmentalCleaner": false
+    },
+    "80": {
+        "resourceId": 80,
+        "name": "Przewalskian Plastics Factory",
+        "satisfaction": -1,
+        "badMin": 1,
+        "badDiv": 5,
+        "environmentalCleaner": false
+    }
 };
 
 

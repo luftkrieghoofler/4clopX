@@ -23,11 +23,44 @@ function keyed(stats, collection, name) {
     return stats && stats[collection] ? stats[collection][name.toLowerCase()] || null : null;
 }
 
-export function actionNeedsSafetyCheck(action, buildingUpkeep) {
+export const NATION_COLLAPSE_THRESHOLD = -5000;
+
+export const REBEL_SATISFACTION_THRESHOLDS = Object.freeze({
+    'Loose Despotism': -100,
+    'Solar Vassal': -100,
+    'Lunar Client': -100,
+    Democracy: 0,
+    Repression: -300,
+    Independence: 0,
+    Decentralization: 0,
+    Oppression: -500,
+    Authoritarianism: -400,
+    'Alicorn Elite': -500,
+    Transponyism: -500,
+});
+
+function effectChangesSatisfaction(effect) {
+    return !!effect && (!!effect.satisfaction || !!effect.badMin || effect.environmentalCleaner);
+}
+
+export function effectiveActionTimes(action, times, stats) {
+    if (!action || !Number.isSafeInteger(times) || times < 1) return 0;
+    if (!Number.isSafeInteger(action.maxOwned) || !action.output || !action.output.isBuilding) return times;
+    const owned = keyed(stats, 'buildingsByName', action.output.name);
+    const remaining = Math.max(0, action.maxOwned - (Number(owned && owned.qty) || 0));
+    return Math.min(times, remaining);
+}
+
+export function actionNeedsSafetyCheck(action, buildingUpkeep, buildingEffects = {}) {
     if (!action) return false;
     if (action.items.some((item) => item.consumed && !item.isBuilding)) return true;
-    return !!(action.output && action.output.isBuilding
-        && (buildingUpkeep[action.output.resourceId] || []).length);
+    if (Number(action.satisfaction) < 0) return true;
+    if (action.items.some((item) => item.consumed && item.isBuilding
+        && effectChangesSatisfaction(buildingEffects[item.resourceId]))) return true;
+    return !!(action.output && action.output.isBuilding && (
+        (buildingUpkeep[action.output.resourceId] || []).length
+        || effectChangesSatisfaction(buildingEffects[action.output.resourceId])
+    ));
 }
 
 // Project only immediate inventory changes and the reserve required after the
@@ -39,12 +72,8 @@ export function projectActionRisks(action, times, stats, buildingUpkeep) {
     // Some actions have a hard owned-building limit. Mirror the server's
     // effective build count so a request for several does not exaggerate
     // costs/upkeep when only the remaining allowance can be built.
-    if (Number.isSafeInteger(action.maxOwned) && action.output && action.output.isBuilding) {
-        const owned = keyed(stats, 'buildingsByName', action.output.name);
-        const remaining = Math.max(0, action.maxOwned - (Number(owned && owned.qty) || 0));
-        times = Math.min(times, remaining);
-        if (times < 1) return [];
-    }
+    times = effectiveActionTimes(action, times, stats);
+    if (times < 1) return [];
 
     const stockDelta = new Map();
     const reserveDelta = new Map();
@@ -96,6 +125,11 @@ export function projectActionRisks(action, times, stats, buildingUpkeep) {
         const stockAfter = stockBefore + stockChange;
         const reserveAfter = Math.max(0, reserveBefore + reserveChange);
 
+        // The server rejects an unaffordable action instead of allowing a
+        // resource to become negative, so a projected negative inventory is
+        // not an upkeep risk the action can actually create.
+        if (stockAfter < 0) continue;
+
         // Warn if this action leaves the resource unsafe and is responsible
         // for making its stock or reserve worse. An unrelated action should
         // not nag merely because a resource was already below upkeep.
@@ -113,4 +147,98 @@ export function projectActionRisks(action, times, stats, buildingUpkeep) {
         }
     }
     return risks.sort((a, b) => a.name.localeCompare(b.name));
+}
+
+function activeBuildingCounts(stats, buildingEffects) {
+    const counts = new Map();
+    for (const [resourceId, effect] of Object.entries(buildingEffects)) {
+        const building = keyed(stats, 'buildingsByName', effect.name);
+        counts.set(String(resourceId), Math.max(0, Number(building && building.active) || 0));
+    }
+    return counts;
+}
+
+function buildingSatisfaction(counts, buildingEffects) {
+    let base = 0;
+    let environmentalDamage = 0;
+    let environmentalCleaners = 0;
+
+    for (const [resourceId, effect] of Object.entries(buildingEffects)) {
+        const count = counts.get(String(resourceId)) || 0;
+        base += count * (Number(effect.satisfaction) || 0);
+        if (effect.environmentalCleaner) environmentalCleaners += count;
+        if (effect.badMin && effect.badDiv && count > effect.badMin) {
+            environmentalDamage += Math.ceil(((count - effect.badMin) ** 2) / effect.badDiv);
+        }
+    }
+
+    const environmentalPenalty = environmentalDamage
+        ? Math.ceil(environmentalDamage * (0.9 ** environmentalCleaners))
+        : 0;
+    return { base, environmentalDamage, environmentalCleaners, environmentalPenalty };
+}
+
+// Project the satisfaction effects caused by this action without attempting
+// to simulate unrelated production chains. The Overview's current net rate
+// remains the baseline; only building counts changed by the action are
+// applied here, including nonlinear environmental damage and cleaners.
+export function projectActionSatisfaction(action, times, stats, buildingEffects = {}) {
+    const effectiveTimes = effectiveActionTimes(action, times, stats);
+    if (!stats || stats.satisfaction === null || stats.satisfaction === undefined
+        || stats.satisfactionPerTick === null || stats.satisfactionPerTick === undefined) return null;
+    const satisfactionBefore = Number(stats && stats.satisfaction);
+    const perTickBefore = Number(stats && stats.satisfactionPerTick);
+    if (!effectiveTimes || !Number.isFinite(satisfactionBefore) || !Number.isFinite(perTickBefore)) return null;
+
+    const beforeCounts = activeBuildingCounts(stats, buildingEffects);
+    const afterCounts = new Map(beforeCounts);
+    for (const item of action.items) {
+        if (!item.consumed || !item.isBuilding) continue;
+        const key = String(item.resourceId);
+        const remove = item.amount * effectiveTimes;
+        afterCounts.set(key, Math.max(0, (afterCounts.get(key) || 0) - remove));
+    }
+    if (action.output && action.output.isBuilding) {
+        const key = String(action.output.resourceId);
+        afterCounts.set(key, (afterCounts.get(key) || 0) + action.output.amount * effectiveTimes);
+    }
+
+    const beforeBuildings = buildingSatisfaction(beforeCounts, buildingEffects);
+    const afterBuildings = buildingSatisfaction(afterCounts, buildingEffects);
+    const perTickChange = (afterBuildings.base - beforeBuildings.base)
+        - (afterBuildings.environmentalPenalty - beforeBuildings.environmentalPenalty);
+    const perTickAfter = perTickBefore + perTickChange;
+    const immediateChange = (Number(action.satisfaction) || 0) * effectiveTimes;
+    const satisfactionAfter = satisfactionBefore + immediateChange;
+    const nextTickSatisfaction = satisfactionAfter + perTickAfter;
+    const nextTickChange = immediateChange + perTickChange;
+    if (![perTickChange, perTickAfter, immediateChange, satisfactionAfter,
+        nextTickSatisfaction, nextTickChange]
+        .every(Number.isSafeInteger)) return null;
+
+    const rebelThreshold = REBEL_SATISFACTION_THRESHOLDS[stats.government];
+    let hazard = null;
+    // Do not nag about a pre-existing next-tick hazard unless this action is
+    // responsible for making that next-tick outcome worse.
+    if (nextTickChange < 0) {
+        if (nextTickSatisfaction < NATION_COLLAPSE_THRESHOLD) hazard = 'collapse';
+        else if (Number.isFinite(rebelThreshold) && nextTickSatisfaction < rebelThreshold) hazard = 'rebels';
+    }
+
+    return {
+        times: effectiveTimes,
+        satisfactionBefore,
+        immediateChange,
+        satisfactionAfter,
+        perTickBefore,
+        perTickChange,
+        perTickAfter,
+        nextTickSatisfaction,
+        nextTickChange,
+        rebelThreshold: Number.isFinite(rebelThreshold) ? rebelThreshold : null,
+        hazard,
+        trendRisk: perTickAfter < 0 && perTickChange < 0,
+        environmentBefore: beforeBuildings,
+        environmentAfter: afterBuildings,
+    };
 }

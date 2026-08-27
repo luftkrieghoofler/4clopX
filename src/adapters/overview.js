@@ -18,12 +18,45 @@
 // Returns {
 //   byName: { <lowercased name>: {name, qty, used, mil, net} },
 //   buildingsByName: { <lowercased name>: {name, qty, disabled, active} },
+//   satisfaction: number | null,
+//   satisfactionPerTick: number | null,
+//   government: string | null,
 //   at: Date,
 // }.
 
 function cellNumber(text) {
     const n = parseInt(text.replace(/,/g, '').trim(), 10);
     return Number.isFinite(n) ? n : 0;
+}
+
+export function nationStatusFromDocument(doc) {
+    for (const panel of doc.querySelectorAll('.panel')) {
+        const heading = panel.querySelector('.panel-heading');
+        if (!heading || heading.textContent.trim() !== 'Nation') continue;
+        const status = {
+            government: null,
+            satisfaction: null,
+            satisfactionPerTick: null,
+        };
+        for (const tr of panel.querySelectorAll('tbody tr')) {
+            const cells = tr.querySelectorAll('td');
+            if (cells.length < 2) continue;
+            const label = cells[0].textContent.trim();
+            const value = cells[1].textContent.trim();
+            if (label === 'Government Type') status.government = value;
+            if (label === 'Satisfaction') {
+                status.satisfaction = cellNumber(value);
+                const perTick = value.match(/\(\s*([+-]?[\d,]+)\s+per tick\s*\)/i);
+                if (perTick) status.satisfactionPerTick = cellNumber(perTick[1]);
+            }
+        }
+        return status;
+    }
+    return { government: null, satisfaction: null, satisfactionPerTick: null };
+}
+
+export function nationSatisfactionFromDocument(doc) {
+    return nationStatusFromDocument(doc).satisfaction;
 }
 
 export function parseResourceStats(doc) {
@@ -90,7 +123,13 @@ export function parseResourceStats(doc) {
             }
             break;
         }
-        return { byName, buildingsByName, at: new Date() };
+        const nation = nationStatusFromDocument(doc);
+        return {
+            byName,
+            buildingsByName,
+            ...nation,
+            at: new Date(),
+        };
     }
     throw new Error('Could not find the Resources table on the Overview page.');
 }

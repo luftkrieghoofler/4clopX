@@ -18,7 +18,7 @@ export const dialogsModule = {
     init(core) {
         core.addStyle(`
             body.clop-confirm-open { overflow: hidden; }
-            .clop-confirm-overlay { position: fixed; top: 0; right: 0; bottom: 0; left: 0; z-index: 10050; display: flex; align-items: flex-start; justify-content: center; padding-top: 60px; background: rgba(0,0,0,.58); }
+            .clop-confirm-overlay { position: fixed; top: 0; right: 0; bottom: 0; left: 0; z-index: 10050; display: flex; align-items: center; justify-content: center; box-sizing: border-box; padding: 20px; background: rgba(0,0,0,.58); }
             .clop-confirm-panel { width: 560px; max-width: 92vw; margin: 0; text-align: left; }
             .clop-confirm-panel .panel-heading { font-size: 16px; }
             .clop-confirm-panel .panel-heading .close { line-height: 1; }
