@@ -1,6 +1,6 @@
 import { actionsFromDocument, actionFormsFromDocument, submittedAction } from '../adapters/actions.js';
 import {
-    formatTickDuration, tickIsImminent, tickSecondsFromDocument,
+    formatTickDuration, tickIsCritical, tickIsImminent, tickSecondsFromDocument,
 } from '../adapters/header.js';
 import { fetchResourceStats } from '../adapters/overview.js';
 import { ACTION_CATALOG, BUILDING_UPKEEP } from '../data/actions.generated.js';
@@ -11,6 +11,7 @@ import {
 const SETTING_KEY = 'actions.confirmUpkeepRisk';
 const AUTHOR_URL = 'viewuser.php?user_id=64';
 const IMMINENT_TICK_SECONDS = 10 * 60;
+const CRITICAL_TICK_SECONDS = 90;
 
 export const actionsModule = {
     name: 'actions',
@@ -41,6 +42,7 @@ export const actionsModule = {
             #clop-action-compat-summary { max-width: 820px; margin: 0 auto 12px; text-align: left; }
             .clop-action-compat-warning { margin: 8px 0; padding: 7px 9px; text-align: left; font-size: 90%; }
             .clop-action-compat-warning a, #clop-action-compat-summary a { font-weight: bold; }
+            .clop-action-tick-critical { border-width: 2px; font-size: 105%; }
             form.clop-action-checking { opacity: .7; pointer-events: none; }
         `);
 
@@ -144,51 +146,82 @@ export const actionsModule = {
             HTMLFormElement.prototype.submit.call(form);
         }
 
-        function confirmationBody(children) {
-            const untilTick = tickSecondsFromDocument(document);
-            const tickWarning = tickIsImminent(untilTick, IMMINENT_TICK_SECONDS)
-                ? el('div', { class: 'alert alert-danger' }, [
-                    el('strong', {}, [
-                        `Next tick is imminent — ${formatTickDuration(untilTick)} remaining.`,
-                    ]),
-                    el('div', {}, [
-                        'Consider waiting until after the tick, or make absolutely certain you can ' +
-                        'top up the affected stockpiles in time.',
-                    ]),
-                ])
-                : null;
-            return el('div', {}, [
-                ...(tickWarning ? [tickWarning] : []),
-                ...(Array.isArray(children) ? children : [children]),
+        function actionConfirm(options) {
+            const imminentHeadline = el('strong');
+            const criticalSeconds = el('strong');
+            const imminent = el('div', { class: 'alert alert-warning', style: 'display:none;' }, [
+                imminentHeadline,
+                el('div', {}, [
+                    'Consider waiting until after the tick, or make absolutely certain you can ' +
+                    'top up the affected stockpiles in time.',
+                ]),
             ]);
+            const critical = el('div', {
+                class: 'alert alert-danger clop-action-tick-critical',
+                style: 'display:none;',
+            }, [
+                el('strong', {}, ['TICK IS ABOUT TO HAPPEN']),
+                el('div', {}, [
+                    'If you proceed and do not fix your upkeep within ', criticalSeconds,
+                    ', your affected buildings will stall.',
+                ]),
+            ]);
+            const bodyChildren = Array.isArray(options.body) ? options.body : [options.body];
+            const body = el('div', {}, [imminent, critical, ...bodyChildren]);
+
+            function updateTickWarnings() {
+                const untilTick = tickSecondsFromDocument(document);
+                const showImminent = tickIsImminent(untilTick, IMMINENT_TICK_SECONDS);
+                const showCritical = tickIsCritical(untilTick, CRITICAL_TICK_SECONDS);
+                imminent.style.display = showImminent ? '' : 'none';
+                critical.style.display = showCritical ? '' : 'none';
+                if (showImminent) {
+                    imminentHeadline.textContent =
+                        `Next tick is imminent — ${formatTickDuration(untilTick)} remaining.`;
+                }
+                if (showCritical) {
+                    criticalSeconds.textContent =
+                        `${untilTick} second${untilTick === 1 ? '' : 's'}`;
+                }
+            }
+
+            return core.confirm({
+                ...options,
+                body,
+                onOpen: () => {
+                    updateTickWarnings();
+                    const timer = setInterval(updateTickWarnings, 250);
+                    return () => clearInterval(timer);
+                },
+            });
         }
 
         function unprotectedConfirmation(state) {
             const name = (state.actual && state.actual.name)
                 || (state.expected && state.expected.name) || `Action #${state.id}`;
             if (state.status === 'changed') {
-                return core.confirm({
+                return actionConfirm({
                     title: 'Action mechanics changed',
-                    body: confirmationBody([
+                    body: [
                         el('div', { class: 'alert alert-danger' }, [
                             el('strong', {}, [`${name} cannot be checked safely. `]),
                             'Its live description differs from the version understood by 4clopX.',
                         ]),
                         el('p', {}, ['Perform it without safe-action protection?']),
-                    ]),
+                    ],
                     confirmLabel: 'Perform anyway',
                 });
             }
             if (state.status === 'unknown') {
-                return core.confirm({
+                return actionConfirm({
                     title: 'Unknown action mechanics',
-                    body: confirmationBody([
+                    body: [
                         el('div', { class: 'alert alert-danger' }, [
                             el('strong', {}, [`${name} cannot be checked safely. `]),
                             '4clopX has no mechanics data for this action.',
                         ]),
                         el('p', {}, ['Perform it without safe-action protection?']),
-                    ]),
+                    ],
                     confirmLabel: 'Perform anyway',
                 });
             }
@@ -204,16 +237,16 @@ export const actionsModule = {
                     : `reserve ${core.commas(risk.reserveBefore)} → ${core.commas(risk.reserveAfter)}`;
                 return `• ${risk.name}: ${stock}; ${reserve}; short by ${core.commas(risk.shortage)}`;
             });
-            return core.confirm({
+            return actionConfirm({
                 title: 'Upkeep reserve at risk',
-                body: confirmationBody([
+                body: [
                     el('div', { class: 'alert alert-warning' }, [
                         el('strong', {}, [`${quantity} would leave insufficient stock `]),
                         'for the protected upkeep reserve.',
                     ]),
                     el('ul', { class: 'clop-confirm-risk-list' }, lines.map((line) =>
                         el('li', {}, [line.replace(/^•\s*/, '')]))),
-                ]),
+                ],
                 confirmLabel: 'Perform anyway',
             });
         }
@@ -242,14 +275,14 @@ export const actionsModule = {
                     }
                     if (state.status !== 'verified') {
                         const detail = loadError ? ` (${String(loadError.message || loadError)})` : '';
-                        if (await core.confirm({
+                        if (await actionConfirm({
                             title: 'Action safety unavailable',
-                            body: confirmationBody([
+                            body: [
                                 el('div', { class: 'alert alert-danger' }, [
                                     `4clopX could not load the live description for this action${detail}.`,
                                 ]),
                                 el('p', {}, ['Perform it without safe-action protection?']),
-                            ]),
+                            ],
                             confirmLabel: 'Perform anyway',
                         })) submitNatively(record.form);
                         return;
@@ -259,14 +292,14 @@ export const actionsModule = {
                         return;
                     }
                     if (!Number.isSafeInteger(submission.times)) {
-                        if (await core.confirm({
+                        if (await actionConfirm({
                             title: 'Action quantity cannot be checked',
-                            body: confirmationBody([
+                            body: [
                                 el('div', { class: 'alert alert-danger' }, [
                                     'The action quantity is too large for 4clopX to calculate safely.',
                                 ]),
                                 el('p', {}, ['Perform it without safe-action protection?']),
-                            ]),
+                            ],
                             confirmLabel: 'Perform anyway',
                         })) submitNatively(record.form);
                         return;
@@ -280,15 +313,15 @@ export const actionsModule = {
                     try {
                         stats = await fetchResourceStats(core);
                     } catch (error) {
-                        if (await core.confirm({
+                        if (await actionConfirm({
                             title: 'Current stock could not be checked',
-                            body: confirmationBody([
+                            body: [
                                 el('div', { class: 'alert alert-danger' }, [
                                     `4clopX could not load your current stock and upkeep ` +
                                     `(${String(error.message || error)}).`,
                                 ]),
                                 el('p', {}, ['Perform this action without safe-action protection?']),
-                            ]),
+                            ],
                             confirmLabel: 'Perform anyway',
                         })) submitNatively(record.form);
                         return;

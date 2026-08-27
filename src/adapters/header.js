@@ -38,6 +38,10 @@ export function tickIsImminent(seconds, thresholdSeconds = 10 * 60) {
     return Number.isFinite(seconds) && seconds >= 0 && seconds < thresholdSeconds;
 }
 
+export function tickIsCritical(seconds, thresholdSeconds = 90) {
+    return Number.isFinite(seconds) && seconds >= 0 && seconds <= thresholdSeconds;
+}
+
 // Stable identity for a navbar anchor carrying a badge: its href, or for
 // dropdown toggles (href="#") the first word of its label ("Alliance",
 // "Capitalism", "War", "Feedback").

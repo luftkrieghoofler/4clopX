@@ -38,6 +38,7 @@ export const dialogsModule = {
                 const id = `clop-confirm-title-${++sequence}`;
                 const bodyId = `clop-confirm-body-${sequence}`;
                 let settled = false;
+                let cleanup = null;
 
                 const body = core.el('div', { id: bodyId, class: 'panel-body' });
                 appendContent(body, options.body || options.message || 'Are you sure?');
@@ -76,6 +77,11 @@ export const dialogsModule = {
                     if (settled) return;
                     settled = true;
                     document.removeEventListener('keydown', onKey, true);
+                    if (cleanup) {
+                        try { cleanup(); } catch (error) {
+                            console.warn('[4clopX] confirmation cleanup failed:', error);
+                        }
+                    }
                     overlay.remove();
                     document.body.classList.remove('clop-confirm-open');
                     if (previousFocus && previousFocus.isConnected && previousFocus.focus) previousFocus.focus();
@@ -115,6 +121,13 @@ export const dialogsModule = {
                 document.addEventListener('keydown', onKey, true);
                 document.body.classList.add('clop-confirm-open');
                 document.body.appendChild(overlay);
+                if (options.onOpen) {
+                    try {
+                        cleanup = options.onOpen({ overlay, panel, body, proceed, cancel }) || null;
+                    } catch (error) {
+                        console.warn('[4clopX] confirmation setup failed:', error);
+                    }
+                }
                 cancel.focus();
             });
         }

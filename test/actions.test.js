@@ -3,7 +3,8 @@ import assert from 'node:assert/strict';
 
 import { phpInteger, submittedAction } from '../src/adapters/actions.js';
 import {
-    formatTickDuration, tickIsImminent, tickSecondsFromDocument, tickSecondsFromText,
+    formatTickDuration, tickIsCritical, tickIsImminent,
+    tickSecondsFromDocument, tickSecondsFromText,
 } from '../src/adapters/header.js';
 import { ACTION_CATALOG, BUILDING_UPKEEP } from '../src/data/actions.generated.js';
 import {
@@ -248,6 +249,9 @@ test('reads the stock game tick countdown and applies a strict ten-minute thresh
     assert.equal(tickIsImminent(599), true);
     assert.equal(tickIsImminent(600), false);
     assert.equal(tickIsImminent(null), false);
+    assert.equal(tickIsCritical(91), false);
+    assert.equal(tickIsCritical(90), true);
+    assert.equal(tickIsCritical(0), true);
     assert.equal(formatTickDuration(599), '9m 59s');
 });
 

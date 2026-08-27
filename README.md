@@ -14,7 +14,7 @@ Install a userscript manager (Violentmonkey, Tampermonkey, or Greasemonkey), the
 
 **Shortcut bar**: save frequently used destinations in a sticky row below the stock navigation. The 🔖 button saves the current view - any page should be supported, even individual markets. Shortcuts can be renamed and reordered from the shortcut manager in ⚙ settings.
 
-**Safe actions**: Actions and Favourite Actions are checked against your current stock and upkeep before they run. If construction costs or new building upkeep would leave a resource below its protected reserve, a themed confirmation explains the shortfall; it also highlights when the next game tick is less than ten minutes away.
+**Safe actions**: Actions and Favourite Actions are checked against your current stock and upkeep before they run. If construction costs or new building upkeep would leave a resource below its protected reserve, a confirmation dialog explains the shortfall.
 
 **Marketplace**:
 
