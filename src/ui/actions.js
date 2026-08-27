@@ -12,7 +12,7 @@ export const actionsModule = {
     name: 'actions',
 
     matches(page) {
-        return page === 'actions.php' || page === 'favoriteactions.php';
+        return page === 'actions.php' || page === 'favoriteactions.php' || page === 'overview.php';
     },
 
     settings(core) {
@@ -82,7 +82,8 @@ export const actionsModule = {
 
         function annotateForm(record, state) {
             if (state.status !== 'unknown' && state.status !== 'changed') return;
-            const host = page === 'favoriteactions.php'
+            const isFavourite = record.form.querySelector('input[name="token_favoriteactions"]');
+            const host = isFavourite
                 ? record.form.closest('.panel')
                 : record.form.closest('td');
             if (!host || host.querySelector(`.clop-action-compat-warning[data-action-id="${record.id}"]`)) return;
@@ -90,7 +91,7 @@ export const actionsModule = {
                 class: 'alert alert-danger clop-action-compat-warning',
                 'data-action-id': record.id,
             }, warningText(state));
-            if (page === 'favoriteactions.php') {
+            if (isFavourite) {
                 const table = host.querySelector('table');
                 host.insertBefore(warning, table || null);
             } else {
@@ -178,7 +179,7 @@ export const actionsModule = {
             record.form.addEventListener('submit', async (event) => {
                 const submitter = event.submitter || clickedSubmitter;
                 clickedSubmitter = null;
-                const submission = submittedAction(record.form, submitter, page);
+                const submission = submittedAction(record.form, submitter);
                 if (!submission || !core.settings.get(SETTING_KEY)) return;
                 event.preventDefault();
                 if (record.form.classList.contains('clop-action-checking')) return;

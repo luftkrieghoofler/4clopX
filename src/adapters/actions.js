@@ -51,12 +51,14 @@ export function actionFormsFromDocument(doc) {
     return forms;
 }
 
-export function submittedAction(form, submitter, page) {
+export function submittedAction(form, submitter) {
     const id = recipeId(form);
     if (!id) return null;
     const intent = submitter ? submitter.name : '';
-    if (page === 'actions.php' && intent === 'favorite') return null;
-    if (page === 'favoriteactions.php' && intent === 'remove') return null;
+    // These controls mutate the favourites list; they do not perform the
+    // recipe.  Detect them by intent so embedded Favourite Actions (such as
+    // those on overview.php) behave like the dedicated page.
+    if (intent === 'favorite' || intent === 'remove') return null;
     return { id, times: phpInteger(form.querySelector('[name="times"]')?.value) };
 }
 

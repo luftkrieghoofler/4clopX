@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { phpInteger } from '../src/adapters/actions.js';
+import { phpInteger, submittedAction } from '../src/adapters/actions.js';
 import { ACTION_CATALOG, BUILDING_UPKEEP } from '../src/data/actions.generated.js';
 import {
     actionCompatibility, actionNeedsSafetyCheck, projectActionRisks,
@@ -210,6 +210,28 @@ test('reads action multipliers using PHP-like numeric conversion', () => {
     assert.equal(phpInteger('2foo'), 2);
     assert.equal(phpInteger('1e3'), 1000);
     assert.equal(phpInteger('not a number'), 0);
+});
+
+test('enables safe actions on every page where recipes can be performed', () => {
+    assert.equal(actionsModule.matches('actions.php'), true);
+    assert.equal(actionsModule.matches('favoriteactions.php'), true);
+    assert.equal(actionsModule.matches('overview.php'), true);
+    assert.equal(actionsModule.matches('viewnation.php'), false);
+});
+
+test('does not mistake embedded favourite-removal controls for performed actions', () => {
+    const form = {
+        querySelector(selector) {
+            if (selector === 'input[name="recipe_id"]') return { value: '40' };
+            if (selector === '[name="times"]') return { value: '3' };
+            return null;
+        },
+    };
+
+    assert.equal(submittedAction(form, { name: 'remove' }), null);
+    assert.deepEqual(submittedAction(form, { name: 'perform' }), {
+        id: '40', times: 3,
+    });
 });
 
 test('offers safe-action confirmation as a separate default-on setting', () => {
