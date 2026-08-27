@@ -61,4 +61,4 @@ The initial snapshot can be regenerated from a CLOP SQL dump with:
 node scripts/generate-action-data.mjs "/path/to/tables with data.sql"
 ```
 
-For a live rebalance that is not available as structured data, update the affected action and its description together in `src/data/actions.generated.js`; update its entry in `BUILDING_UPKEEP` too when its resulting building upkeep changed. New actions need a complete catalogue entry before the script will protect them.
+For a live rebalance that is not available as structured data, add a clearly labelled live override at the bottom of `src/data/actions.generated.js`, changing the affected action and its description together; update its entry in `BUILDING_UPKEEP` too when its resulting building upkeep changed. The generator preserves everything from the `LIVE OVERRIDES` marker onward. New actions need a complete catalogue entry before the script will protect them.

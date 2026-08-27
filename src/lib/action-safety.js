@@ -36,6 +36,16 @@ export function actionNeedsSafetyCheck(action, buildingUpkeep) {
 export function projectActionRisks(action, times, stats, buildingUpkeep) {
     if (!action || !Number.isSafeInteger(times) || times < 1) return [];
 
+    // Some actions have a hard owned-building limit. Mirror the server's
+    // effective build count so a request for several does not exaggerate
+    // costs/upkeep when only the remaining allowance can be built.
+    if (Number.isSafeInteger(action.maxOwned) && action.output && action.output.isBuilding) {
+        const owned = keyed(stats, 'buildingsByName', action.output.name);
+        const remaining = Math.max(0, action.maxOwned - (Number(owned && owned.qty) || 0));
+        times = Math.min(times, remaining);
+        if (times < 1) return [];
+    }
+
     const stockDelta = new Map();
     const reserveDelta = new Map();
     const displayNames = new Map();

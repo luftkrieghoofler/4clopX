@@ -19,6 +19,61 @@ test('pairs original action mechanics with their original descriptions', () => {
     assert.deepEqual(BUILDING_UPKEEP[5], [{ resourceId: 4, name: 'Energy', amount: 1 }]);
 });
 
+test('uses the manually verified live DNA-facility rebalance', () => {
+    assert.equal(ACTION_CATALOG[51].description,
+        'With 1000 machine parts, 750 vehicles, and 500 precision parts, begin extracting DNA from the local ponies and wildlife of the North Burrozilian region. Requires 10 apples per tick. Building more than one causes geometric sat loss from environmental damage.');
+    assert.deepEqual(ACTION_CATALOG[51].items.map(({ name, amount }) => ({ name, amount })), [
+        { name: 'Machinery Parts', amount: 1000 },
+        { name: 'Vehicle Parts', amount: 750 },
+        { name: 'Precision Parts', amount: 500 },
+    ]);
+    for (let buildingId = 50; buildingId <= 61; buildingId += 1) {
+        assert.deepEqual(BUILDING_UPKEEP[buildingId], [
+            { resourceId: 3, name: 'Apples', amount: 10 },
+        ]);
+    }
+});
+
+test('uses the manually verified live Forbidden Research Facility rebalance', () => {
+    const action = ACTION_CATALOG[57];
+    assert.match(action.description, /10000 copper, 5000 machinery parts, and 1000 precision parts/);
+    assert.match(action.description, /total of 12 DNA, plus 50 gems, tungsten, and copper every tick/);
+    assert.equal(action.maxOwned, 1);
+    assert.deepEqual(action.items.map(({ name, amount }) => ({ name, amount })), [
+        { name: 'Copper', amount: 10000 },
+        { name: 'Machinery Parts', amount: 5000 },
+        { name: 'Precision Parts', amount: 1000 },
+    ]);
+    assert.equal(BUILDING_UPKEEP[74].length, 15);
+    assert.equal(BUILDING_UPKEEP[74].filter(({ name }) => name.startsWith('DNA -'))
+        .every(({ amount }) => amount === 1), true);
+    assert.deepEqual(BUILDING_UPKEEP[74].slice(-3).map(({ name, amount }) => ({ name, amount })), [
+        { name: 'Gems', amount: 50 },
+        { name: 'Tungsten', amount: 50 },
+        { name: 'Copper', amount: 50 },
+    ]);
+});
+
+test('caps Solar and Lunar Environmental Facilities at five owned', () => {
+    assert.equal(ACTION_CATALOG[40].maxOwned, 5);
+    assert.equal(ACTION_CATALOG[41].maxOwned, 5);
+
+    const stats = {
+        byName: {
+            energy: { name: 'Energy', qty: 4, used: 0, mil: 0 },
+            copper: { name: 'Copper', qty: 500, used: 0, mil: 0 },
+            'machinery parts': { name: 'Machinery Parts', qty: 100, used: 0, mil: 0 },
+            composites: { name: 'Composites', qty: 100, used: 0, mil: 0 },
+        },
+        buildingsByName: {
+            'solar environmental facility': { qty: 4, active: 4 },
+        },
+    };
+    const risks = projectActionRisks(ACTION_CATALOG[40], 5, stats, BUILDING_UPKEEP);
+    assert.equal(risks.find(({ name }) => name === 'Energy').reserveAfter, 5,
+        'only the one remaining facility is projected');
+});
+
 test('distinguishes verified, changed, and wholly unknown actions', () => {
     const expected = { name: 'Build Bakery', description: 'Uses apples every tick.' };
     assert.deepEqual(actionCompatibility({
@@ -82,6 +137,44 @@ test('subtracts only the upkeep of active buildings consumed by an upgrade', () 
 
     assert.equal(risks[0].reserveBefore, 4);
     assert.equal(risks[0].reserveAfter, 10, 'remove one active old upkeep, then add two new upkeep');
+});
+
+test('new DNA-facility upkeep is included in the safety projection', () => {
+    const risks = projectActionRisks(ACTION_CATALOG[51], 1, {
+        byName: {
+            apples: { name: 'Apples', qty: 9, used: 0, mil: 0 },
+            'machinery parts': { name: 'Machinery Parts', qty: 1000, used: 0, mil: 0 },
+            'vehicle parts': { name: 'Vehicle Parts', qty: 750, used: 0, mil: 0 },
+            'precision parts': { name: 'Precision Parts', qty: 500, used: 0, mil: 0 },
+        },
+        buildingsByName: {},
+    }, BUILDING_UPKEEP);
+
+    assert.deepEqual(risks, [{
+        name: 'Apples', stockBefore: 9, stockAfter: 9, stockChange: 0,
+        reserveBefore: 0, reserveAfter: 10, reserveChange: 10, shortage: 1,
+    }]);
+});
+
+test('an owned-building limit caps the projected action count', () => {
+    const action = {
+        maxOwned: 1,
+        items: [],
+        output: { resourceId: 99, name: 'Unique Factory', isBuilding: true, amount: 1 },
+    };
+    const upkeep = { 99: [{ resourceId: 4, name: 'Energy', amount: 5 }] };
+    const stats = {
+        byName: { energy: { name: 'Energy', qty: 6, used: 0, mil: 0 } },
+        buildingsByName: {},
+    };
+    assert.deepEqual(projectActionRisks(action, 10, stats, upkeep), []);
+
+    stats.byName.energy.qty = 4;
+    assert.equal(projectActionRisks(action, 10, stats, upkeep)[0].reserveAfter, 5,
+        'project one remaining building, not all ten requested');
+
+    stats.buildingsByName['unique factory'] = { qty: 1, active: 1 };
+    assert.deepEqual(projectActionRisks(action, 10, stats, upkeep), []);
 });
 
 test('does not warn on an exact reserve boundary or unrelated existing shortage', () => {

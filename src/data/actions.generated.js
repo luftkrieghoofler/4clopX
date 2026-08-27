@@ -1855,3 +1855,70 @@ export const BUILDING_UPKEEP = {
         }
     ]
 };
+
+
+// LIVE OVERRIDES (preserved by generator)
+// These values were manually verified against the current hosted game's
+// action descriptions and intentionally replace the old-repository snapshot.
+
+ACTION_CATALOG[40].maxOwned = 5;
+ACTION_CATALOG[41].maxOwned = 5;
+
+const DNA_EXTRACTION_REGIONS = {
+    45: 'North Saddle Arabian',
+    46: 'Central Saddle Arabian',
+    47: 'South Saddle Arabian',
+    48: 'North Zebrican',
+    49: 'Central Zebrican',
+    50: 'South Zebrican',
+    51: 'North Burrozilian',
+    52: 'Central Burrozilian',
+    53: 'South Burrozilian',
+    54: 'North Przewalskian',
+    55: 'Central Przewalskian',
+    56: 'South Przewalskian',
+};
+
+for (const [actionId, region] of Object.entries(DNA_EXTRACTION_REGIONS)) {
+    const action = ACTION_CATALOG[actionId];
+    action.description =
+        `With 1000 machine parts, 750 vehicles, and 500 precision parts, begin extracting DNA ` +
+        `from the local ponies and wildlife of the ${region} region. Requires 10 apples per tick. ` +
+        'Building more than one causes geometric sat loss from environmental damage.';
+    action.items = [
+        { resourceId: 10, name: 'Machinery Parts', isBuilding: false, consumed: true, amount: 1000 },
+        { resourceId: 9, name: 'Vehicle Parts', isBuilding: false, consumed: true, amount: 750 },
+        { resourceId: 29, name: 'Precision Parts', isBuilding: false, consumed: true, amount: 500 },
+    ];
+    BUILDING_UPKEEP[action.output.resourceId] = [
+        { resourceId: 3, name: 'Apples', amount: 10 },
+    ];
+}
+
+Object.assign(ACTION_CATALOG[57], {
+    description: 'Requires 10000 copper, 5000 machinery parts, and 1000 precision parts to build. Every turn, this facility requires 1 DNA from each of the dozen region and subregion combinations: a total of 12 DNA, plus 50 gems, tungsten, and copper every tick. Reduces relationship with both the Solar Empire and New Lunar Republic by 15 a tick. Provides 1 Forbidden Research a tick. Limit one per customer. With 200 Forbidden Research... (Wait 1 tick after the research is complete.)',
+    maxOwned: 1,
+    items: [
+        { resourceId: 2, name: 'Copper', isBuilding: false, consumed: true, amount: 10000 },
+        { resourceId: 10, name: 'Machinery Parts', isBuilding: false, consumed: true, amount: 5000 },
+        { resourceId: 29, name: 'Precision Parts', isBuilding: false, consumed: true, amount: 1000 },
+    ],
+});
+
+BUILDING_UPKEEP[74] = [
+    { resourceId: 62, name: 'DNA - North Saddle Arabia', amount: 1 },
+    { resourceId: 63, name: 'DNA - Central Saddle Arabia', amount: 1 },
+    { resourceId: 64, name: 'DNA - South Saddle Arabia', amount: 1 },
+    { resourceId: 65, name: 'DNA - North Zebrica', amount: 1 },
+    { resourceId: 66, name: 'DNA - Central Zebrica', amount: 1 },
+    { resourceId: 67, name: 'DNA - South Zebrica', amount: 1 },
+    { resourceId: 68, name: 'DNA - North Burrozil', amount: 1 },
+    { resourceId: 69, name: 'DNA - Central Burrozil', amount: 1 },
+    { resourceId: 70, name: 'DNA - South Burrozil', amount: 1 },
+    { resourceId: 71, name: 'DNA - North Przewalskia', amount: 1 },
+    { resourceId: 72, name: 'DNA - Central Przewalskia', amount: 1 },
+    { resourceId: 73, name: 'DNA - South Przewalskia', amount: 1 },
+    { resourceId: 26, name: 'Gems', amount: 50 },
+    { resourceId: 27, name: 'Tungsten', amount: 50 },
+    { resourceId: 2, name: 'Copper', amount: 50 },
+];
