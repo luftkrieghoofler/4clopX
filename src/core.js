@@ -120,6 +120,7 @@ export const core = {
         //                          //   sections appear in first-seen order
         //   type: 'bool' | 'number' | 'choice' | 'button',
         //   default,               // bool/number/choice
+        //   min, max, step,        // optional number-input constraints
         //   options,               // choice: [{value, label, example?}]
         //   handler,               // button: invoked by the settings UI
         //   feedback: false,       // button: do not replace its label with

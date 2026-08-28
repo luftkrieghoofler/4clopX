@@ -24,6 +24,8 @@
 //   at: Date,
 // }.
 
+export const RESOURCE_STATS_CACHE_KEY = 'clopx.live.overview';
+
 function cellNumber(text) {
     const n = parseInt(text.replace(/,/g, '').trim(), 10);
     return Number.isFinite(n) ? n : 0;
@@ -59,21 +61,61 @@ export function nationSatisfactionFromDocument(doc) {
     return nationStatusFromDocument(doc).satisfaction;
 }
 
-export function parseResourceStats(doc) {
+function resourceTableInfo(doc) {
     for (const panel of doc.querySelectorAll('.panel')) {
         const heading = panel.querySelector('.panel-heading');
         if (!heading || heading.textContent.trim() !== 'Resources') continue;
         const table = panel.querySelector('table');
-        if (!table) break;
-        // Resolve columns by header label so the optional icon column (an
-        // empty header cell) can't shift anything.
-        const headCells = [...table.querySelectorAll('thead td, thead th')].map((c) => c.textContent.trim());
-        const cName = headCells.indexOf('Resource');
-        const cQty = headCells.indexOf('Qty');
-        const cGenerated = headCells.indexOf('Generated');
-        const cUsed = headCells.indexOf('Used');
-        const cNet = headCells.indexOf('Net');
-        if (cName < 0 || cQty < 0 || cGenerated < 0 || cUsed < 0 || cNet < 0) break;
+        if (!table) return null;
+        const headers = [...table.querySelectorAll('thead td, thead th')]
+            .map((cell) => cell.textContent.trim());
+        const columns = {
+            name: headers.indexOf('Resource'),
+            qty: headers.indexOf('Qty'),
+            generated: headers.indexOf('Generated'),
+            used: headers.indexOf('Used'),
+            net: headers.indexOf('Net'),
+        };
+        if (Object.values(columns).some((column) => column < 0)) return null;
+        return { panel, table, headers, columns };
+    }
+    return null;
+}
+
+// The live Overview UI uses this to attach status badges without assuming
+// whether the optional icon column is present.
+export function overviewResourceRows(doc) {
+    const info = resourceTableInfo(doc);
+    if (!info) return [];
+    const iconColumn = info.columns.name > 0 && info.headers[info.columns.name - 1] === ''
+        ? info.columns.name - 1
+        : -1;
+    const rows = [];
+    for (const row of info.table.querySelectorAll('tbody tr')) {
+        const cells = row.querySelectorAll('td');
+        const nameCell = cells[info.columns.name];
+        if (!nameCell) continue;
+        const name = nameCell.textContent.trim();
+        if (!name) continue;
+        rows.push({
+            name,
+            row,
+            nameCell,
+            iconCell: iconColumn >= 0 ? cells[iconColumn] || null : null,
+        });
+    }
+    return rows;
+}
+
+export function parseResourceStats(doc) {
+    const info = resourceTableInfo(doc);
+    if (info) {
+        const { panel, table, columns } = info;
+        const cName = columns.name;
+        const cQty = columns.qty;
+        const cGenerated = columns.generated;
+        const cUsed = columns.used;
+        const cNet = columns.net;
         const byName = {};
         for (const tr of table.querySelectorAll('tbody tr')) {
             const cells = tr.querySelectorAll('td');
@@ -136,6 +178,94 @@ export function parseResourceStats(doc) {
     throw new Error('Could not find the Resources table on the Overview page.');
 }
 
+function snapshotResourceStats(stats, at = Date.now()) {
+    const byName = {};
+    for (const [key, resource] of Object.entries(stats && stats.byName || {})) {
+        if (!resource || !resource.name) continue;
+        byName[key] = {
+            name: String(resource.name),
+            qty: Number(resource.qty) || 0,
+            generated: Number(resource.generated) || 0,
+            used: Number(resource.used) || 0,
+            mil: Number(resource.mil) || 0,
+            net: Number(resource.net) || 0,
+        };
+    }
+    return { at: Number(at) || Date.now(), byName };
+}
+
+export function readCachedResourceStats() {
+    try {
+        const record = JSON.parse(localStorage.getItem(RESOURCE_STATS_CACHE_KEY) || 'null');
+        if (!record || typeof record !== 'object' || !record.byName) return null;
+        return snapshotResourceStats(record, record.at);
+    } catch (e) {
+        return null;
+    }
+}
+
+// Publish only the resource portion needed by global badges. Safety checks
+// still use their freshly parsed full result (including buildings and nation
+// status), while every such fetch updates this cross-tab cache for free.
+export function publishResourceStats(core, stats, at = Date.now()) {
+    const snapshot = snapshotResourceStats(stats, at);
+    try { localStorage.setItem(RESOURCE_STATS_CACHE_KEY, JSON.stringify(snapshot)); } catch (e) { /* ignore */ }
+    if (core && core.events) core.events.emit('overview:resourceStats', { stats: snapshot });
+    return snapshot;
+}
+
+// The stock column subtracts one upcoming consumption before dividing the
+// remaining buffer by the ongoing deficit. It therefore displays zero for a
+// resource which can run exactly once more; add that omitted tick back.
+export function resourceTicksWorth(resource) {
+    if (!resource) return null;
+    const qty = Number(resource.qty);
+    const used = Number(resource.used);
+    const net = Number(resource.net);
+    if (![qty, used, net].every(Number.isFinite) || net >= 0) return null;
+    if (qty < used) return 0;
+    return Math.max(0, Math.floor((qty - used) / Math.abs(net)) + 1);
+}
+
+const tickThreshold = (value, fallback) => {
+    const number = Number(value);
+    return Number.isFinite(number) ? Math.max(0, Math.floor(number)) : fallback;
+};
+
+export function resourceBufferSummary(stats, warningTicks = 5, criticalTicks = 1) {
+    const warningThreshold = tickThreshold(warningTicks, 5);
+    const criticalThreshold = tickThreshold(criticalTicks, 1);
+    const warning = [];
+    const critical = [];
+    for (const resource of Object.values(stats && stats.byName || {})) {
+        const ticks = resourceTicksWorth(resource);
+        if (ticks === null) continue;
+        const item = { name: resource.name, ticks };
+        if (ticks <= criticalThreshold) critical.push(item);
+        else if (ticks <= warningThreshold) warning.push(item);
+    }
+    const compare = (a, b) => a.ticks - b.ticks || a.name.localeCompare(b.name);
+    warning.sort(compare);
+    critical.sort(compare);
+    return {
+        warningThreshold,
+        criticalThreshold,
+        warning,
+        critical,
+        affected: [...critical, ...warning],
+    };
+}
+
+export function newlyCriticalResources(previous, current, warningTicks = 5, criticalTicks = 1) {
+    if (!previous) return [];
+    const before = new Set(resourceBufferSummary(
+        previous, warningTicks, criticalTicks).critical.map((item) => item.name.toLowerCase()));
+    return resourceBufferSummary(current, warningTicks, criticalTicks).critical
+        .filter((item) => !before.has(item.name.toLowerCase()));
+}
+
 export async function fetchResourceStats(core) {
-    return parseResourceStats(await core.http.getDoc('overview.php'));
+    const stats = parseResourceStats(await core.http.getDoc('overview.php'));
+    publishResourceStats(core, stats);
+    return stats;
 }

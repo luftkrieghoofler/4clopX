@@ -187,12 +187,25 @@ export const settingsModule = {
                 ]), [cb]);
             }
             if (def.type === 'number') {
-                const input = el('input', { class: 'form-control input-sm clop-setting-num', type: 'text' });
+                const attrs = { class: 'form-control input-sm clop-setting-num', type: 'number' };
+                if (Number.isFinite(def.min)) attrs.min = def.min;
+                if (Number.isFinite(def.max)) attrs.max = def.max;
+                if (Number.isFinite(def.step)) attrs.step = def.step;
+                const input = el('input', attrs);
                 input.value = String(core.settings.get(def.key));
                 settingRefreshers.set(def.key, (value) => { input.value = String(value); });
                 input.addEventListener('change', () => {
-                    const n = Number(input.value);
-                    if (Number.isFinite(n)) changed(def, n);
+                    let n = Number(input.value);
+                    if (Number.isFinite(n)) {
+                        if (Number.isFinite(def.min)) n = Math.max(def.min, n);
+                        if (Number.isFinite(def.max)) n = Math.min(def.max, n);
+                        if (Number.isFinite(def.step) && def.step > 0) {
+                            const base = Number.isFinite(def.min) ? def.min : 0;
+                            n = base + Math.round((n - base) / def.step) * def.step;
+                        }
+                        input.value = String(n);
+                        changed(def, n);
+                    }
                     else input.value = String(core.settings.get(def.key));  // reject garbage
                 });
                 return withParent(def, el('div', { class: 'clop-setting' }, [

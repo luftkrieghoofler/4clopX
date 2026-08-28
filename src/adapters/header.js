@@ -1,15 +1,15 @@
 // Header badge adapter.  The stock navbar renders every notification count
 // (messages, alliance messages, deals, incoming attacks, polls) on every
-// page load, so "checking for news" is a single GET of any cheap page that
-// includes header.php — guide.php is static text plus the header and needs
-// no nation, making it the lightest probe.
+// page load, so "checking for news" is a single GET of a page that includes
+// header.php. The live-update engine probes overview.php so the same request
+// can also refresh the nation's resource-buffer status.
 //
 // Badge text is rendered by backend_header.php as " (N)" when nonzero and
 // "" when zero, so text is copied verbatim and digits are parsed only for
 // change detection.  Badges the userscript adds itself (.clop-menu-badge)
 // are ignored here.
 
-export const HEADER_PROBE_PAGE = 'guide.php';
+export const HEADER_PROBE_PAGE = 'overview.php';
 
 // The stock header's server-seeded countdown is kept current by the game.
 // Keep this parser here with the other stock-header scraping rather than

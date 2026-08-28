@@ -254,7 +254,7 @@ export const shortcutsModule = {
             const headingText = heading && (heading.textContent || '').replace(/\s+/g, ' ').trim();
             if (headingText) return headingText.slice(0, 80);
             const title = String(document.title || '')
-                .replace(/^(?:\[[^\]]+\]\s*)?(?:\(Mkt:[^)]+\)\s*)?/, '')
+                .replace(/^(?:!{1,2}\s*)?(?:\[[^\]]+\]\s*)?(?:\(Mkt:[^)]+\)\s*)?/, '')
                 .replace(/\s*[-|–]\s*>?CLOP.*$/i, '')
                 .trim();
             return (title || target.href.replace(/^\//, '') || 'Shortcut').slice(0, 80);
@@ -709,6 +709,7 @@ export const shortcutsModule = {
             refreshUi();
         });
         core.events.on('market:friendlyCache', renderBar);
+        core.events.on('overview:resourceStats', renderBar);
         window.addEventListener('storage', (ev) => {
             if (shortcutStorageChange(ev.key)) refreshUi();
         });
