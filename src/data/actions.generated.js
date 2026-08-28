@@ -1925,7 +1925,8 @@ export const BUILDING_EFFECTS = {
         "satisfaction": -1,
         "badMin": 20,
         "badDiv": 10,
-        "environmentalCleaner": false
+        "environmentalCleaner": false,
+        "production": []
     },
     "6": {
         "resourceId": 6,
@@ -1933,7 +1934,14 @@ export const BUILDING_EFFECTS = {
         "satisfaction": -2,
         "badMin": 10,
         "badDiv": 10,
-        "environmentalCleaner": false
+        "environmentalCleaner": false,
+        "production": [
+            {
+                "resourceId": 1,
+                "name": "Oil",
+                "amount": 5
+            }
+        ]
     },
     "7": {
         "resourceId": 7,
@@ -1941,7 +1949,14 @@ export const BUILDING_EFFECTS = {
         "satisfaction": -2,
         "badMin": 10,
         "badDiv": 10,
-        "environmentalCleaner": false
+        "environmentalCleaner": false,
+        "production": [
+            {
+                "resourceId": 2,
+                "name": "Copper",
+                "amount": 5
+            }
+        ]
     },
     "8": {
         "resourceId": 8,
@@ -1949,7 +1964,14 @@ export const BUILDING_EFFECTS = {
         "satisfaction": -2,
         "badMin": 10,
         "badDiv": 10,
-        "environmentalCleaner": false
+        "environmentalCleaner": false,
+        "production": [
+            {
+                "resourceId": 3,
+                "name": "Apples",
+                "amount": 5
+            }
+        ]
     },
     "11": {
         "resourceId": 11,
@@ -1957,7 +1979,14 @@ export const BUILDING_EFFECTS = {
         "satisfaction": -2,
         "badMin": 5,
         "badDiv": 5,
-        "environmentalCleaner": false
+        "environmentalCleaner": false,
+        "production": [
+            {
+                "resourceId": 4,
+                "name": "Energy",
+                "amount": 12
+            }
+        ]
     },
     "12": {
         "resourceId": 12,
@@ -1965,7 +1994,14 @@ export const BUILDING_EFFECTS = {
         "satisfaction": 1,
         "badMin": 0,
         "badDiv": 0,
-        "environmentalCleaner": false
+        "environmentalCleaner": false,
+        "production": [
+            {
+                "resourceId": 13,
+                "name": "Pies",
+                "amount": 3
+            }
+        ]
     },
     "14": {
         "resourceId": 14,
@@ -1973,7 +2009,14 @@ export const BUILDING_EFFECTS = {
         "satisfaction": -1,
         "badMin": 20,
         "badDiv": 5,
-        "environmentalCleaner": false
+        "environmentalCleaner": false,
+        "production": [
+            {
+                "resourceId": 1,
+                "name": "Oil",
+                "amount": 8
+            }
+        ]
     },
     "15": {
         "resourceId": 15,
@@ -1981,7 +2024,14 @@ export const BUILDING_EFFECTS = {
         "satisfaction": -1,
         "badMin": 20,
         "badDiv": 5,
-        "environmentalCleaner": false
+        "environmentalCleaner": false,
+        "production": [
+            {
+                "resourceId": 2,
+                "name": "Copper",
+                "amount": 8
+            }
+        ]
     },
     "16": {
         "resourceId": 16,
@@ -1989,7 +2039,14 @@ export const BUILDING_EFFECTS = {
         "satisfaction": -1,
         "badMin": 20,
         "badDiv": 5,
-        "environmentalCleaner": false
+        "environmentalCleaner": false,
+        "production": [
+            {
+                "resourceId": 3,
+                "name": "Apples",
+                "amount": 8
+            }
+        ]
     },
     "17": {
         "resourceId": 17,
@@ -1997,7 +2054,14 @@ export const BUILDING_EFFECTS = {
         "satisfaction": 0,
         "badMin": 0,
         "badDiv": 0,
-        "environmentalCleaner": false
+        "environmentalCleaner": false,
+        "production": [
+            {
+                "resourceId": 18,
+                "name": "Cider",
+                "amount": 5
+            }
+        ]
     },
     "19": {
         "resourceId": 19,
@@ -2005,7 +2069,14 @@ export const BUILDING_EFFECTS = {
         "satisfaction": -1,
         "badMin": 15,
         "badDiv": 10,
-        "environmentalCleaner": false
+        "environmentalCleaner": false,
+        "production": [
+            {
+                "resourceId": 20,
+                "name": "Coffee",
+                "amount": 5
+            }
+        ]
     },
     "21": {
         "resourceId": 21,
@@ -2013,7 +2084,8 @@ export const BUILDING_EFFECTS = {
         "satisfaction": 10,
         "badMin": 0,
         "badDiv": 0,
-        "environmentalCleaner": false
+        "environmentalCleaner": false,
+        "production": []
     },
     "22": {
         "resourceId": 22,
@@ -2021,7 +2093,8 @@ export const BUILDING_EFFECTS = {
         "satisfaction": 10,
         "badMin": 0,
         "badDiv": 0,
-        "environmentalCleaner": false
+        "environmentalCleaner": false,
+        "production": []
     },
     "23": {
         "resourceId": 23,
@@ -2029,7 +2102,14 @@ export const BUILDING_EFFECTS = {
         "satisfaction": 0,
         "badMin": 0,
         "badDiv": 0,
-        "environmentalCleaner": false
+        "environmentalCleaner": false,
+        "production": [
+            {
+                "resourceId": 25,
+                "name": "Gasoline",
+                "amount": 8
+            }
+        ]
     },
     "24": {
         "resourceId": 24,
@@ -2037,7 +2117,14 @@ export const BUILDING_EFFECTS = {
         "satisfaction": 0,
         "badMin": 0,
         "badDiv": 0,
-        "environmentalCleaner": false
+        "environmentalCleaner": false,
+        "production": [
+            {
+                "resourceId": 4,
+                "name": "Energy",
+                "amount": 12
+            }
+        ]
     },
     "31": {
         "resourceId": 31,
@@ -2045,7 +2132,8 @@ export const BUILDING_EFFECTS = {
         "satisfaction": -1,
         "badMin": 5,
         "badDiv": 5,
-        "environmentalCleaner": false
+        "environmentalCleaner": false,
+        "production": []
     },
     "32": {
         "resourceId": 32,
@@ -2053,7 +2141,14 @@ export const BUILDING_EFFECTS = {
         "satisfaction": -1,
         "badMin": 7,
         "badDiv": 5,
-        "environmentalCleaner": false
+        "environmentalCleaner": false,
+        "production": [
+            {
+                "resourceId": 26,
+                "name": "Gems",
+                "amount": 3
+            }
+        ]
     },
     "33": {
         "resourceId": 33,
@@ -2061,7 +2156,14 @@ export const BUILDING_EFFECTS = {
         "satisfaction": -1,
         "badMin": 7,
         "badDiv": 5,
-        "environmentalCleaner": false
+        "environmentalCleaner": false,
+        "production": [
+            {
+                "resourceId": 27,
+                "name": "Tungsten",
+                "amount": 4
+            }
+        ]
     },
     "34": {
         "resourceId": 34,
@@ -2069,7 +2171,14 @@ export const BUILDING_EFFECTS = {
         "satisfaction": -1,
         "badMin": 7,
         "badDiv": 5,
-        "environmentalCleaner": false
+        "environmentalCleaner": false,
+        "production": [
+            {
+                "resourceId": 28,
+                "name": "Plastics",
+                "amount": 4
+            }
+        ]
     },
     "35": {
         "resourceId": 35,
@@ -2077,7 +2186,14 @@ export const BUILDING_EFFECTS = {
         "satisfaction": -2,
         "badMin": 5,
         "badDiv": 5,
-        "environmentalCleaner": false
+        "environmentalCleaner": false,
+        "production": [
+            {
+                "resourceId": 1,
+                "name": "Oil",
+                "amount": 20
+            }
+        ]
     },
     "36": {
         "resourceId": 36,
@@ -2085,7 +2201,8 @@ export const BUILDING_EFFECTS = {
         "satisfaction": 0,
         "badMin": 1,
         "badDiv": 1,
-        "environmentalCleaner": false
+        "environmentalCleaner": false,
+        "production": []
     },
     "37": {
         "resourceId": 37,
@@ -2093,7 +2210,8 @@ export const BUILDING_EFFECTS = {
         "satisfaction": 10,
         "badMin": 0,
         "badDiv": 0,
-        "environmentalCleaner": false
+        "environmentalCleaner": false,
+        "production": []
     },
     "38": {
         "resourceId": 38,
@@ -2101,7 +2219,8 @@ export const BUILDING_EFFECTS = {
         "satisfaction": 1,
         "badMin": 0,
         "badDiv": 0,
-        "environmentalCleaner": false
+        "environmentalCleaner": false,
+        "production": []
     },
     "39": {
         "resourceId": 39,
@@ -2109,7 +2228,8 @@ export const BUILDING_EFFECTS = {
         "satisfaction": 0,
         "badMin": 0,
         "badDiv": 0,
-        "environmentalCleaner": false
+        "environmentalCleaner": false,
+        "production": []
     },
     "40": {
         "resourceId": 40,
@@ -2117,7 +2237,8 @@ export const BUILDING_EFFECTS = {
         "satisfaction": 0,
         "badMin": 0,
         "badDiv": 0,
-        "environmentalCleaner": false
+        "environmentalCleaner": false,
+        "production": []
     },
     "41": {
         "resourceId": 41,
@@ -2125,7 +2246,14 @@ export const BUILDING_EFFECTS = {
         "satisfaction": 0,
         "badMin": 0,
         "badDiv": 0,
-        "environmentalCleaner": false
+        "environmentalCleaner": false,
+        "production": [
+            {
+                "resourceId": 42,
+                "name": "Drugs",
+                "amount": 10
+            }
+        ]
     },
     "44": {
         "resourceId": 44,
@@ -2133,7 +2261,8 @@ export const BUILDING_EFFECTS = {
         "satisfaction": 0,
         "badMin": 0,
         "badDiv": 0,
-        "environmentalCleaner": true
+        "environmentalCleaner": true,
+        "production": []
     },
     "45": {
         "resourceId": 45,
@@ -2141,7 +2270,8 @@ export const BUILDING_EFFECTS = {
         "satisfaction": 0,
         "badMin": 0,
         "badDiv": 0,
-        "environmentalCleaner": true
+        "environmentalCleaner": true,
+        "production": []
     },
     "46": {
         "resourceId": 46,
@@ -2149,7 +2279,14 @@ export const BUILDING_EFFECTS = {
         "satisfaction": 0,
         "badMin": 0,
         "badDiv": 0,
-        "environmentalCleaner": false
+        "environmentalCleaner": false,
+        "production": [
+            {
+                "resourceId": 47,
+                "name": "Toys",
+                "amount": 3
+            }
+        ]
     },
     "48": {
         "resourceId": 48,
@@ -2157,7 +2294,8 @@ export const BUILDING_EFFECTS = {
         "satisfaction": 30,
         "badMin": 0,
         "badDiv": 0,
-        "environmentalCleaner": false
+        "environmentalCleaner": false,
+        "production": []
     },
     "49": {
         "resourceId": 49,
@@ -2165,7 +2303,8 @@ export const BUILDING_EFFECTS = {
         "satisfaction": 50,
         "badMin": 0,
         "badDiv": 0,
-        "environmentalCleaner": false
+        "environmentalCleaner": false,
+        "production": []
     },
     "50": {
         "resourceId": 50,
@@ -2173,7 +2312,14 @@ export const BUILDING_EFFECTS = {
         "satisfaction": 0,
         "badMin": 1,
         "badDiv": 1,
-        "environmentalCleaner": false
+        "environmentalCleaner": false,
+        "production": [
+            {
+                "resourceId": 62,
+                "name": "DNA - North Saddle Arabia",
+                "amount": 1
+            }
+        ]
     },
     "51": {
         "resourceId": 51,
@@ -2181,7 +2327,14 @@ export const BUILDING_EFFECTS = {
         "satisfaction": 0,
         "badMin": 1,
         "badDiv": 1,
-        "environmentalCleaner": false
+        "environmentalCleaner": false,
+        "production": [
+            {
+                "resourceId": 63,
+                "name": "DNA - Central Saddle Arabia",
+                "amount": 1
+            }
+        ]
     },
     "52": {
         "resourceId": 52,
@@ -2189,7 +2342,14 @@ export const BUILDING_EFFECTS = {
         "satisfaction": 0,
         "badMin": 1,
         "badDiv": 1,
-        "environmentalCleaner": false
+        "environmentalCleaner": false,
+        "production": [
+            {
+                "resourceId": 64,
+                "name": "DNA - South Saddle Arabia",
+                "amount": 1
+            }
+        ]
     },
     "53": {
         "resourceId": 53,
@@ -2197,7 +2357,14 @@ export const BUILDING_EFFECTS = {
         "satisfaction": 0,
         "badMin": 1,
         "badDiv": 1,
-        "environmentalCleaner": false
+        "environmentalCleaner": false,
+        "production": [
+            {
+                "resourceId": 65,
+                "name": "DNA - North Zebrica",
+                "amount": 1
+            }
+        ]
     },
     "54": {
         "resourceId": 54,
@@ -2205,7 +2372,14 @@ export const BUILDING_EFFECTS = {
         "satisfaction": 0,
         "badMin": 1,
         "badDiv": 1,
-        "environmentalCleaner": false
+        "environmentalCleaner": false,
+        "production": [
+            {
+                "resourceId": 66,
+                "name": "DNA - Central Zebrica",
+                "amount": 1
+            }
+        ]
     },
     "55": {
         "resourceId": 55,
@@ -2213,7 +2387,14 @@ export const BUILDING_EFFECTS = {
         "satisfaction": 0,
         "badMin": 1,
         "badDiv": 1,
-        "environmentalCleaner": false
+        "environmentalCleaner": false,
+        "production": [
+            {
+                "resourceId": 67,
+                "name": "DNA - South Zebrica",
+                "amount": 1
+            }
+        ]
     },
     "56": {
         "resourceId": 56,
@@ -2221,7 +2402,14 @@ export const BUILDING_EFFECTS = {
         "satisfaction": 0,
         "badMin": 1,
         "badDiv": 1,
-        "environmentalCleaner": false
+        "environmentalCleaner": false,
+        "production": [
+            {
+                "resourceId": 68,
+                "name": "DNA - North Burrozil",
+                "amount": 1
+            }
+        ]
     },
     "57": {
         "resourceId": 57,
@@ -2229,7 +2417,14 @@ export const BUILDING_EFFECTS = {
         "satisfaction": 0,
         "badMin": 1,
         "badDiv": 1,
-        "environmentalCleaner": false
+        "environmentalCleaner": false,
+        "production": [
+            {
+                "resourceId": 69,
+                "name": "DNA - Central Burrozil",
+                "amount": 1
+            }
+        ]
     },
     "58": {
         "resourceId": 58,
@@ -2237,7 +2432,14 @@ export const BUILDING_EFFECTS = {
         "satisfaction": 0,
         "badMin": 1,
         "badDiv": 1,
-        "environmentalCleaner": false
+        "environmentalCleaner": false,
+        "production": [
+            {
+                "resourceId": 70,
+                "name": "DNA - South Burrozil",
+                "amount": 1
+            }
+        ]
     },
     "59": {
         "resourceId": 59,
@@ -2245,7 +2447,14 @@ export const BUILDING_EFFECTS = {
         "satisfaction": 0,
         "badMin": 1,
         "badDiv": 1,
-        "environmentalCleaner": false
+        "environmentalCleaner": false,
+        "production": [
+            {
+                "resourceId": 71,
+                "name": "DNA - North Przewalskia",
+                "amount": 1
+            }
+        ]
     },
     "60": {
         "resourceId": 60,
@@ -2253,7 +2462,14 @@ export const BUILDING_EFFECTS = {
         "satisfaction": 0,
         "badMin": 1,
         "badDiv": 1,
-        "environmentalCleaner": false
+        "environmentalCleaner": false,
+        "production": [
+            {
+                "resourceId": 72,
+                "name": "DNA - Central Przewalskia",
+                "amount": 1
+            }
+        ]
     },
     "61": {
         "resourceId": 61,
@@ -2261,7 +2477,14 @@ export const BUILDING_EFFECTS = {
         "satisfaction": 0,
         "badMin": 1,
         "badDiv": 1,
-        "environmentalCleaner": false
+        "environmentalCleaner": false,
+        "production": [
+            {
+                "resourceId": 73,
+                "name": "DNA - South Przewalskia",
+                "amount": 1
+            }
+        ]
     },
     "74": {
         "resourceId": 74,
@@ -2269,7 +2492,14 @@ export const BUILDING_EFFECTS = {
         "satisfaction": 0,
         "badMin": 0,
         "badDiv": 0,
-        "environmentalCleaner": false
+        "environmentalCleaner": false,
+        "production": [
+            {
+                "resourceId": 75,
+                "name": "Forbidden Research",
+                "amount": 1
+            }
+        ]
     },
     "76": {
         "resourceId": 76,
@@ -2277,7 +2507,14 @@ export const BUILDING_EFFECTS = {
         "satisfaction": 0,
         "badMin": 0,
         "badDiv": 0,
-        "environmentalCleaner": false
+        "environmentalCleaner": false,
+        "production": [
+            {
+                "resourceId": 77,
+                "name": "Apotheosis Serum",
+                "amount": 1
+            }
+        ]
     },
     "78": {
         "resourceId": 78,
@@ -2285,7 +2522,14 @@ export const BUILDING_EFFECTS = {
         "satisfaction": 0,
         "badMin": 0,
         "badDiv": 0,
-        "environmentalCleaner": false
+        "environmentalCleaner": false,
+        "production": [
+            {
+                "resourceId": 4,
+                "name": "Energy",
+                "amount": 1
+            }
+        ]
     },
     "79": {
         "resourceId": 79,
@@ -2293,7 +2537,14 @@ export const BUILDING_EFFECTS = {
         "satisfaction": 0,
         "badMin": 0,
         "badDiv": 0,
-        "environmentalCleaner": false
+        "environmentalCleaner": false,
+        "production": [
+            {
+                "resourceId": 4,
+                "name": "Energy",
+                "amount": 1
+            }
+        ]
     },
     "80": {
         "resourceId": 80,
@@ -2301,7 +2552,14 @@ export const BUILDING_EFFECTS = {
         "satisfaction": -1,
         "badMin": 1,
         "badDiv": 5,
-        "environmentalCleaner": false
+        "environmentalCleaner": false,
+        "production": [
+            {
+                "resourceId": 28,
+                "name": "Plastics",
+                "amount": 5
+            }
+        ]
     }
 };
 

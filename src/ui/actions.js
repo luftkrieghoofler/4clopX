@@ -7,10 +7,13 @@ import {
 import { fetchResourceStats } from '../adapters/overview.js';
 import { ACTION_CATALOG, BUILDING_EFFECTS, BUILDING_UPKEEP } from '../data/actions.generated.js';
 import {
-    actionCompatibility, actionNeedsSafetyCheck, projectActionRisks, projectActionSatisfaction,
+    actionCompatibility, actionNeedsSafetyCheck, projectActionResourceRates,
+    projectActionRisks, projectActionSatisfaction,
 } from '../lib/action-safety.js';
 
 const SETTING_KEY = 'actions.confirmUpkeepRisk';
+const SATISFACTION_TREND_SETTING_KEY = 'actions.confirmNegativeSatisfactionRate';
+const RESOURCE_TREND_SETTING_KEY = 'actions.confirmNegativeResourceRates';
 const AUTHOR_URL = 'viewuser.php?user_id=64';
 const IMMINENT_TICK_SECONDS = 10 * 60;
 const CRITICAL_TICK_SECONDS = 90;
@@ -44,9 +47,27 @@ export const actionsModule = {
         core.settings.define({
             key: SETTING_KEY,
             label: 'Confirm risky actions',
-            description: 'Before performing a known Action or Favorite Action, check protected upkeep and satisfaction risks.',
+            description: 'Before performing a known Action or Favorite Action, check protected upkeep, satisfaction, and production risks.',
             type: 'bool',
             default: true,
+            section: 'Actions',
+        });
+        core.settings.define({
+            key: SATISFACTION_TREND_SETTING_KEY,
+            label: 'Warn when satisfaction/tick is negative',
+            description: 'Confirm actions that create or worsen an ongoing satisfaction decline.',
+            type: 'bool',
+            default: true,
+            parent: SETTING_KEY,
+            section: 'Actions',
+        });
+        core.settings.define({
+            key: RESOURCE_TREND_SETTING_KEY,
+            label: 'Warn when domestic resource/tick is negative',
+            description: 'Confirm actions that create or worsen a deficit in a domestically produced resource.',
+            type: 'bool',
+            default: true,
+            parent: SETTING_KEY,
             section: 'Actions',
         });
     },
@@ -324,7 +345,11 @@ export const actionsModule = {
             return value > 0 ? `+${core.commas(value)}` : core.commas(value);
         }
 
-        function riskConfirmation(action, times, risks, satisfactionProjection, burnOil = null) {
+        function riskConfirmation(action, times, risks, satisfactionProjection, {
+            burnOil = null,
+            showSatisfactionTrend = true,
+            resourceRateRisks = [],
+        } = {}) {
             const quantity = times === 1 ? action.name : `${action.name} × ${core.commas(times)}`;
             const lines = risks.map((risk) => {
                 const stock = `stock ${core.commas(risk.stockBefore)} → ${core.commas(risk.stockAfter)}`;
@@ -335,6 +360,8 @@ export const actionsModule = {
             });
             const body = [];
             const hazard = satisfactionProjection && satisfactionProjection.hazard;
+            const satisfactionTrend = !!(showSatisfactionTrend && !hazard
+                && satisfactionProjection && satisfactionProjection.trendRisk);
             if (hazard) {
                 const collapse = hazard === 'collapse';
                 const headline = collapse
@@ -398,7 +425,7 @@ export const actionsModule = {
                         ' Divide the oil you intend to burn by 5 before entering the action count.',
                     ]));
                 }
-            } else if (satisfactionProjection && satisfactionProjection.trendRisk) {
+            } else if (satisfactionTrend) {
                 const heading = satisfactionProjection.perTickBefore >= 0
                     ? 'This action would make satisfaction decrease each tick.'
                     : 'This action would make the existing satisfaction decline worse.';
@@ -411,6 +438,24 @@ export const actionsModule = {
                             ' → ', el('strong', {}, [signed(satisfactionProjection.perTickAfter)]),
                         ]),
                     ]),
+                ]));
+            }
+            if (resourceRateRisks.length) {
+                const rateRows = [];
+                for (const risk of resourceRateRisks) {
+                    rateRows.push(
+                        el('span', {}, [`${risk.name}/tick:`]),
+                        el('span', {}, [
+                            el('strong', {}, [signed(risk.netBefore)]),
+                            ' → ', el('strong', {}, [signed(risk.netAfter)]),
+                        ]),
+                    );
+                }
+                body.push(el('div', { class: 'alert alert-warning' }, [
+                    el('strong', { class: 'clop-action-satisfaction-title' }, [
+                        'This action would create or worsen domestic resource deficits.',
+                    ]),
+                    el('div', { class: 'clop-action-satisfaction-summary' }, rateRows),
                 ]));
             }
             if (risks.length) {
@@ -426,8 +471,12 @@ export const actionsModule = {
             let title = 'Upkeep reserve at risk';
             if (hazard === 'collapse') title = 'Nation collapse risk';
             else if (hazard === 'rebels') title = 'Rebel risk';
-            else if (satisfactionProjection && satisfactionProjection.trendRisk) {
-                title = risks.length ? 'Satisfaction and upkeep at risk' : 'Satisfaction declining';
+            else {
+                const warningTypes = Number(satisfactionTrend)
+                    + Number(resourceRateRisks.length > 0) + Number(risks.length > 0);
+                if (warningTypes > 1) title = 'Action safety warning';
+                else if (satisfactionTrend) title = 'Satisfaction declining';
+                else if (resourceRateRisks.length) title = 'Resource production declining';
             }
             return actionConfirm({
                 title,
@@ -516,14 +565,24 @@ export const actionsModule = {
                         state.expected, submission.times, stats, BUILDING_UPKEEP);
                     const satisfactionProjection = projectActionSatisfaction(
                         state.expected, submission.times, stats, BUILDING_EFFECTS);
+                    const showSatisfactionTrend = !!core.settings.get(
+                        SATISFACTION_TREND_SETTING_KEY);
+                    const resourceRateRisks = core.settings.get(RESOURCE_TREND_SETTING_KEY)
+                        ? projectActionResourceRates(
+                            state.expected, submission.times, stats,
+                            BUILDING_UPKEEP, BUILDING_EFFECTS)
+                        : [];
                     const burnOil = record.id === BURN_OIL_ACTION_ID
                         ? burnOilOutcome(submission.times, stats.satisfaction)
                         : null;
                     const satisfactionRisk = satisfactionProjection
-                        && (satisfactionProjection.hazard || satisfactionProjection.trendRisk);
-                    if ((!risks.length && !satisfactionRisk)
+                        && (satisfactionProjection.hazard
+                            || (showSatisfactionTrend && satisfactionProjection.trendRisk));
+                    if ((!risks.length && !satisfactionRisk && !resourceRateRisks.length)
                         || await riskConfirmation(
-                            state.expected, submission.times, risks, satisfactionProjection, burnOil)) {
+                            state.expected, submission.times, risks, satisfactionProjection, {
+                                burnOil, showSatisfactionTrend, resourceRateRisks,
+                            })) {
                         submitNatively(record.form);
                     }
                 } finally {

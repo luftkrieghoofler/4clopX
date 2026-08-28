@@ -63,6 +63,6 @@ The initial snapshot can be regenerated from a CLOP SQL dump with:
 node scripts/generate-action-data.mjs "/path/to/tables with data.sql"
 ```
 
-For a live rebalance that is not available as structured data, add a clearly labelled live override at the bottom of `src/data/actions.generated.js`, changing the affected action and its description together; update its entries in `BUILDING_UPKEEP` and `BUILDING_EFFECTS` too when the resulting building mechanics changed. The generator preserves everything from the `LIVE OVERRIDES` marker onward. New actions need a complete catalogue entry before the script will protect them.
+For a live rebalance that is not available as structured data, add a clearly labelled live override at the bottom of `src/data/actions.generated.js`, changing the affected action and its description together; update its entries in `BUILDING_UPKEEP` and `BUILDING_EFFECTS` (including resource production) too when the resulting building mechanics changed. The generator preserves everything from the `LIVE OVERRIDES` marker onward. New actions need a complete catalogue entry before the script will protect them.
 
 Burn Oil's five-oil reminder and warning presentation are deliberate UI special cases in `src/ui/actions.js`. Recipe-level immediate satisfaction is also generated for the common next-tick projection. Both remain gated by the normal exact-description compatibility check, so the warning and calculation disappear instead of using stale values if that action changes.

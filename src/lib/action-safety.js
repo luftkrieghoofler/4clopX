@@ -39,8 +39,11 @@ export const REBEL_SATISFACTION_THRESHOLDS = Object.freeze({
     Transponyism: -500,
 });
 
-function effectChangesSatisfaction(effect) {
-    return !!effect && (!!effect.satisfaction || !!effect.badMin || effect.environmentalCleaner);
+function effectNeedsProjection(effect) {
+    return !!effect && (
+        !!effect.satisfaction || !!effect.badMin || effect.environmentalCleaner
+        || (effect.production || []).length > 0
+    );
 }
 
 export function effectiveActionTimes(action, times, stats) {
@@ -56,10 +59,10 @@ export function actionNeedsSafetyCheck(action, buildingUpkeep, buildingEffects =
     if (action.items.some((item) => item.consumed && !item.isBuilding)) return true;
     if (Number(action.satisfaction) < 0) return true;
     if (action.items.some((item) => item.consumed && item.isBuilding
-        && effectChangesSatisfaction(buildingEffects[item.resourceId]))) return true;
+        && effectNeedsProjection(buildingEffects[item.resourceId]))) return true;
     return !!(action.output && action.output.isBuilding && (
         (buildingUpkeep[action.output.resourceId] || []).length
-        || effectChangesSatisfaction(buildingEffects[action.output.resourceId])
+        || effectNeedsProjection(buildingEffects[action.output.resourceId])
     ));
 }
 
@@ -158,6 +161,25 @@ function activeBuildingCounts(stats, buildingEffects) {
     return counts;
 }
 
+function projectedBuildingCounts(action, times, stats, buildingEffects) {
+    const effectiveTimes = effectiveActionTimes(action, times, stats);
+    const before = activeBuildingCounts(stats, buildingEffects);
+    const after = new Map(before);
+    if (!effectiveTimes) return { effectiveTimes, before, after };
+
+    for (const item of action.items) {
+        if (!item.consumed || !item.isBuilding) continue;
+        const key = String(item.resourceId);
+        const remove = item.amount * effectiveTimes;
+        after.set(key, Math.max(0, (after.get(key) || 0) - remove));
+    }
+    if (action.output && action.output.isBuilding) {
+        const key = String(action.output.resourceId);
+        after.set(key, (after.get(key) || 0) + action.output.amount * effectiveTimes);
+    }
+    return { effectiveTimes, before, after };
+}
+
 function buildingSatisfaction(counts, buildingEffects) {
     let base = 0;
     let environmentalDamage = 0;
@@ -183,25 +205,13 @@ function buildingSatisfaction(counts, buildingEffects) {
 // remains the baseline; only building counts changed by the action are
 // applied here, including nonlinear environmental damage and cleaners.
 export function projectActionSatisfaction(action, times, stats, buildingEffects = {}) {
-    const effectiveTimes = effectiveActionTimes(action, times, stats);
     if (!stats || stats.satisfaction === null || stats.satisfaction === undefined
         || stats.satisfactionPerTick === null || stats.satisfactionPerTick === undefined) return null;
     const satisfactionBefore = Number(stats && stats.satisfaction);
     const perTickBefore = Number(stats && stats.satisfactionPerTick);
+    const { effectiveTimes, before: beforeCounts, after: afterCounts } =
+        projectedBuildingCounts(action, times, stats, buildingEffects);
     if (!effectiveTimes || !Number.isFinite(satisfactionBefore) || !Number.isFinite(perTickBefore)) return null;
-
-    const beforeCounts = activeBuildingCounts(stats, buildingEffects);
-    const afterCounts = new Map(beforeCounts);
-    for (const item of action.items) {
-        if (!item.consumed || !item.isBuilding) continue;
-        const key = String(item.resourceId);
-        const remove = item.amount * effectiveTimes;
-        afterCounts.set(key, Math.max(0, (afterCounts.get(key) || 0) - remove));
-    }
-    if (action.output && action.output.isBuilding) {
-        const key = String(action.output.resourceId);
-        afterCounts.set(key, (afterCounts.get(key) || 0) + action.output.amount * effectiveTimes);
-    }
 
     const beforeBuildings = buildingSatisfaction(beforeCounts, buildingEffects);
     const afterBuildings = buildingSatisfaction(afterCounts, buildingEffects);
@@ -241,4 +251,62 @@ export function projectActionSatisfaction(action, times, stats, buildingEffects 
         environmentBefore: beforeBuildings,
         environmentAfter: afterBuildings,
     };
+}
+
+// Project only the resource-rate changes caused by buildings added or
+// consumed by this action. The Overview's current Net column remains the
+// baseline, preserving unrelated production, use, and stockpile loss.
+export function projectActionResourceRates(action, times, stats, buildingUpkeep, buildingEffects = {}) {
+    const { effectiveTimes, before, after } =
+        projectedBuildingCounts(action, times, stats, buildingEffects);
+    if (!effectiveTimes) return [];
+
+    const productionDelta = new Map();
+    const upkeepDelta = new Map();
+    const displayNames = new Map();
+    for (const [resourceId, effect] of Object.entries(buildingEffects)) {
+        const countChange = (after.get(String(resourceId)) || 0) - (before.get(String(resourceId)) || 0);
+        if (!countChange) continue;
+        for (const production of effect.production || []) {
+            const key = production.name.toLowerCase();
+            displayNames.set(key, production.name);
+            add(productionDelta, key, production.amount * countChange);
+        }
+        for (const requirement of buildingUpkeep[resourceId] || []) {
+            const key = requirement.name.toLowerCase();
+            displayNames.set(key, requirement.name);
+            add(upkeepDelta, key, requirement.amount * countChange);
+        }
+    }
+
+    const risks = [];
+    const keys = new Set([...productionDelta.keys(), ...upkeepDelta.keys()]);
+    for (const key of keys) {
+        const current = keyed(stats, 'byName', key) || {};
+        const generatedBefore = Number(current.generated) || 0;
+        const usedBefore = Number(current.used) || 0;
+        const netBefore = Number(current.net) || 0;
+        const generatedAfter = generatedBefore + (productionDelta.get(key) || 0);
+        const usedAfter = Math.max(0, usedBefore + (upkeepDelta.get(key) || 0));
+        const netChange = (productionDelta.get(key) || 0) - (upkeepDelta.get(key) || 0);
+        const netAfter = netBefore + netChange;
+        if (![generatedAfter, usedAfter, netChange, netAfter].every(Number.isSafeInteger)) continue;
+
+        // Imported resources naturally have a negative rate. Warn only when
+        // there is domestic production before or after this action, and this
+        // action is responsible for creating or worsening the deficit.
+        if (netAfter < 0 && netChange < 0 && (generatedBefore > 0 || generatedAfter > 0)) {
+            risks.push({
+                name: current.name || displayNames.get(key) || key,
+                generatedBefore,
+                generatedAfter,
+                usedBefore,
+                usedAfter,
+                netBefore,
+                netAfter,
+                netChange,
+            });
+        }
+    }
+    return risks.sort((a, b) => a.name.localeCompare(b.name));
 }

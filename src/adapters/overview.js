@@ -16,7 +16,7 @@
 // upgrades can consume active buildings and thereby remove their upkeep.
 //
 // Returns {
-//   byName: { <lowercased name>: {name, qty, used, mil, net} },
+//   byName: { <lowercased name>: {name, qty, generated, used, mil, net} },
 //   buildingsByName: { <lowercased name>: {name, qty, disabled, active} },
 //   satisfaction: number | null,
 //   satisfactionPerTick: number | null,
@@ -70,18 +70,20 @@ export function parseResourceStats(doc) {
         const headCells = [...table.querySelectorAll('thead td, thead th')].map((c) => c.textContent.trim());
         const cName = headCells.indexOf('Resource');
         const cQty = headCells.indexOf('Qty');
+        const cGenerated = headCells.indexOf('Generated');
         const cUsed = headCells.indexOf('Used');
         const cNet = headCells.indexOf('Net');
-        if (cName < 0 || cQty < 0 || cUsed < 0 || cNet < 0) break;
+        if (cName < 0 || cQty < 0 || cGenerated < 0 || cUsed < 0 || cNet < 0) break;
         const byName = {};
         for (const tr of table.querySelectorAll('tbody tr')) {
             const cells = tr.querySelectorAll('td');
-            if (cells.length <= Math.max(cName, cQty, cUsed, cNet)) continue;
+            if (cells.length <= Math.max(cName, cQty, cGenerated, cUsed, cNet)) continue;
             const name = cells[cName].textContent.trim();
             if (!name) continue;
             byName[name.toLowerCase()] = {
                 name,
                 qty: cellNumber(cells[cQty].textContent),
+                generated: cellNumber(cells[cGenerated].textContent),
                 used: cellNumber(cells[cUsed].textContent),
                 mil: 0,
                 net: cellNumber(cells[cNet].textContent),
@@ -97,7 +99,7 @@ export function parseResourceStats(doc) {
                 if (!byName[key]) {
                     byName[key] = {
                         name: `${m[2][0].toUpperCase()}${m[2].slice(1).toLowerCase()}`,
-                        qty: 0, used: 0, mil: 0, net: 0,
+                        qty: 0, generated: 0, used: 0, mil: 0, net: 0,
                     };
                 }
                 byName[key].mil = cellNumber(m[1]);

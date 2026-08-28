@@ -7,13 +7,14 @@ import {
     tickSecondsFromDocument, tickSecondsFromText,
 } from '../src/adapters/header.js';
 import {
-    nationSatisfactionFromDocument, nationStatusFromDocument,
+    nationSatisfactionFromDocument, nationStatusFromDocument, parseResourceStats,
 } from '../src/adapters/overview.js';
 import {
     ACTION_CATALOG, BUILDING_EFFECTS, BUILDING_UPKEEP,
 } from '../src/data/actions.generated.js';
 import {
-    actionCompatibility, actionNeedsSafetyCheck, projectActionRisks, projectActionSatisfaction,
+    actionCompatibility, actionNeedsSafetyCheck, projectActionResourceRates,
+    projectActionRisks, projectActionSatisfaction,
 } from '../src/lib/action-safety.js';
 import { actionsModule, burnOilOutcome } from '../src/ui/actions.js';
 
@@ -34,7 +35,11 @@ test('pairs original action mechanics with their original descriptions', () => {
         badMin: 20,
         badDiv: 10,
         environmentalCleaner: false,
+        production: [],
     });
+    assert.deepEqual(BUILDING_EFFECTS[6].production, [
+        { resourceId: 1, name: 'Oil', amount: 5 },
+    ]);
 });
 
 test('uses the manually verified live DNA-facility rebalance', () => {
@@ -235,9 +240,91 @@ test('recognizes actions which need a safety projection', () => {
         items: [], output: { isBuilding: true, resourceId: 6 },
     }, {}, BUILDING_EFFECTS), true, 'a no-upkeep building still changes satisfaction');
     assert.equal(actionNeedsSafetyCheck({
+        items: [], output: { isBuilding: true, resourceId: 78 },
+    }, {}, BUILDING_EFFECTS), true, 'a production-only building still needs a rate projection');
+    assert.equal(actionNeedsSafetyCheck({
         satisfaction: -5, items: [], output: null,
     }, {}, BUILDING_EFFECTS), true);
     assert.equal(actionNeedsSafetyCheck({ items: [], output: null }, {}, BUILDING_EFFECTS), false);
+});
+
+test('warns when building upkeep makes a domestically produced resource net-negative', () => {
+    const action = {
+        items: [],
+        output: { resourceId: 99, name: 'Energy Consumer', isBuilding: true, amount: 1 },
+    };
+    const effects = {
+        99: {
+            resourceId: 99, name: 'Energy Consumer', satisfaction: 0,
+            badMin: 0, badDiv: 0, environmentalCleaner: false, production: [],
+        },
+    };
+    const risks = projectActionResourceRates(action, 1, {
+        byName: {
+            energy: { name: 'Energy', generated: 5, used: 3, net: 2 },
+        },
+        buildingsByName: {},
+    }, {
+        99: [{ resourceId: 4, name: 'Energy', amount: 4 }],
+    }, effects);
+
+    assert.deepEqual(risks, [{
+        name: 'Energy',
+        generatedBefore: 5,
+        generatedAfter: 5,
+        usedBefore: 3,
+        usedAfter: 7,
+        netBefore: 2,
+        netAfter: -2,
+        netChange: -4,
+    }]);
+});
+
+test('warns when an action worsens an existing domestic resource deficit', () => {
+    const action = {
+        items: [],
+        output: { resourceId: 99, name: 'Energy Consumer', isBuilding: true, amount: 1 },
+    };
+    const effects = {
+        99: {
+            resourceId: 99, name: 'Energy Consumer', satisfaction: 0,
+            badMin: 0, badDiv: 0, environmentalCleaner: false, production: [],
+        },
+    };
+    const [risk] = projectActionResourceRates(action, 1, {
+        byName: {
+            energy: { name: 'Energy', generated: 5, used: 6, net: -1 },
+        },
+        buildingsByName: {},
+    }, {
+        99: [{ resourceId: 4, name: 'Energy', amount: 2 }],
+    }, effects);
+
+    assert.equal(risk.netBefore, -1);
+    assert.equal(risk.netAfter, -3);
+});
+
+test('does not warn about negative rates for purely imported resources', () => {
+    const action = {
+        items: [],
+        output: { resourceId: 99, name: 'Oil Consumer', isBuilding: true, amount: 1 },
+    };
+    const effects = {
+        99: {
+            resourceId: 99, name: 'Oil Consumer', satisfaction: 0,
+            badMin: 0, badDiv: 0, environmentalCleaner: false, production: [],
+        },
+    };
+    const risks = projectActionResourceRates(action, 1, {
+        byName: {
+            oil: { name: 'Oil', generated: 0, used: 3, net: -3 },
+        },
+        buildingsByName: {},
+    }, {
+        99: [{ resourceId: 1, name: 'Oil', amount: 2 }],
+    }, effects);
+
+    assert.deepEqual(risks, []);
 });
 
 test('reads action multipliers using PHP-like numeric conversion', () => {
@@ -411,6 +498,33 @@ test('reads government and satisfaction rates from the Overview Nation panel', (
     assert.equal(nationSatisfactionFromDocument(doc), 1234);
 });
 
+test('reads domestic production from the Overview Resources table', () => {
+    const cells = ['Energy', '100', '12', '9', '0', '+3'].map((textContent) => ({ textContent }));
+    const table = {
+        querySelectorAll(selector) {
+            if (selector === 'thead td, thead th') {
+                return ['Resource', 'Qty', 'Generated', 'Used', 'Loss', 'Net']
+                    .map((textContent) => ({ textContent }));
+            }
+            if (selector === 'tbody tr') return [{ querySelectorAll: () => cells }];
+            return [];
+        },
+    };
+    const panel = {
+        querySelector(selector) {
+            if (selector === '.panel-heading') return { textContent: 'Resources' };
+            if (selector === 'table') return table;
+            return null;
+        },
+        querySelectorAll: () => [],
+    };
+    const stats = parseResourceStats({ querySelectorAll: () => [panel] });
+
+    assert.deepEqual(stats.byName.energy, {
+        name: 'Energy', qty: 100, generated: 12, used: 9, mil: 0, net: 3,
+    });
+});
+
 test('enables safe actions on every page where recipes can be performed', () => {
     assert.equal(actionsModule.matches('actions.php'), true);
     assert.equal(actionsModule.matches('favoriteactions.php'), true);
@@ -450,7 +564,7 @@ test('reads the stock game tick countdown and applies a strict ten-minute thresh
     assert.equal(formatTickDuration(599), '9m 59s');
 });
 
-test('offers safe-action confirmation as a separate default-on setting', () => {
+test('offers safe-action confirmation and default-on trend settings', () => {
     const definitions = [];
     actionsModule.settings({ settings: { define: (definition) => definitions.push(definition) } });
     const setting = definitions.find(({ key }) => key === 'actions.confirmUpkeepRisk');
@@ -458,4 +572,15 @@ test('offers safe-action confirmation as a separate default-on setting', () => {
     assert.equal(setting.type, 'bool');
     assert.equal(setting.default, true);
     assert.equal(setting.section, 'Actions');
+
+    for (const key of [
+        'actions.confirmNegativeSatisfactionRate',
+        'actions.confirmNegativeResourceRates',
+    ]) {
+        const trendSetting = definitions.find((definition) => definition.key === key);
+        assert.equal(trendSetting.type, 'bool');
+        assert.equal(trendSetting.default, true);
+        assert.equal(trendSetting.parent, 'actions.confirmUpkeepRisk');
+        assert.equal(trendSetting.section, 'Actions');
+    }
 });

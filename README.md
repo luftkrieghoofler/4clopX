@@ -14,7 +14,7 @@ Install a userscript manager (Violentmonkey, Tampermonkey, or Greasemonkey), the
 
 **Shortcut bar**: save frequently used destinations in a sticky row below the stock navigation. The 🔖 button saves the current view - any page should be supported, even individual markets. Shortcuts can be renamed and reordered from the shortcut manager in ⚙ settings.
 
-**Safe actions**: Actions and Favourite Actions are checked against your current stock, upkeep, and satisfaction before they run. A confirmation dialogue protects against actions whose construction costs or new upkeep would leave a resource below its protected reserve or result in negative satisfaction. Also shows a reminder for Burn Oil to prevent the classic mistake of burning 5x too much.
+**Safe actions**: Actions and Favourite Actions are checked against your current stock, upkeep, production, and satisfaction before they run. A confirmation dialogue protects against actions whose construction costs or new upkeep would leave a resource below its protected reserve, create a domestic production deficit, or cause dangerous satisfaction outcomes. The lighter production- and satisfaction-per-tick warnings can be disabled independently. Also shows a reminder for Burn Oil to prevent the classic mistake of burning 5x too much.
 
 **Marketplace**:
 

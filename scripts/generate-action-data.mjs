@@ -120,6 +120,13 @@ for (const row of tableRows('resourcerequirements')) {
     upkeep[row[0]].push({ resourceId: row[1], name: resource.name, amount: row[2] });
 }
 
+const production = new Map();
+for (const row of tableRows('resourceeffects')) {
+    const resource = resources.get(row[1]);
+    if (!production.has(row[0])) production.set(row[0], []);
+    production.get(row[0]).push({ resourceId: row[1], name: resource.name, amount: row[2] });
+}
+
 const buildingEffects = {};
 for (const resource of resources.values()) {
     if (!resource.isBuilding) continue;
@@ -130,6 +137,7 @@ for (const resource of resources.values()) {
         badMin: resource.badMin,
         badDiv: resource.badDiv,
         environmentalCleaner: resource.id === 44 || resource.id === 45,
+        production: production.get(resource.id) || [],
     };
 }
 
