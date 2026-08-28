@@ -345,19 +345,45 @@ export const actionsModule = {
             return value > 0 ? `+${core.commas(value)}` : core.commas(value);
         }
 
+        function upkeepRiskListItem(risk) {
+            const stockChanged = risk.stockBefore !== risk.stockAfter;
+            const consumptionChanged = risk.reserveBefore !== risk.reserveAfter;
+            const change = (label, before, after) => [
+                `${label} ${after < before ? 'decreases' : 'increases'} from `,
+                core.commas(before),
+                ' to ',
+                el('strong', {}, [core.commas(after)]),
+            ];
+            const details = [];
+
+            if (stockChanged) details.push(...change('stock', risk.stockBefore, risk.stockAfter));
+            if (stockChanged && consumptionChanged) details.push(' and ');
+            if (consumptionChanged) {
+                details.push(...change('consumption', risk.reserveBefore, risk.reserveAfter));
+            }
+            if (!stockChanged) {
+                details.push('; current stock is ', core.commas(risk.stockAfter));
+            } else if (!consumptionChanged) {
+                details.push('; current consumption is ', core.commas(risk.reserveAfter));
+            }
+            details.push(
+                ' — short by ',
+                el('strong', {}, [core.commas(risk.shortage)]),
+                ' for next tick.',
+            );
+            return el('li', {}, [
+                el('strong', {}, [`${risk.name}:`]),
+                ' ',
+                ...details,
+            ]);
+        }
+
         function riskConfirmation(action, times, risks, satisfactionProjection, {
             burnOil = null,
             showSatisfactionTrend = true,
             resourceRateRisks = [],
         } = {}) {
             const quantity = times === 1 ? action.name : `${action.name} × ${core.commas(times)}`;
-            const lines = risks.map((risk) => {
-                const stock = `stock ${core.commas(risk.stockBefore)} → ${core.commas(risk.stockAfter)}`;
-                const reserve = risk.reserveBefore === risk.reserveAfter
-                    ? `reserve ${core.commas(risk.reserveAfter)}`
-                    : `reserve ${core.commas(risk.reserveBefore)} → ${core.commas(risk.reserveAfter)}`;
-                return `• ${risk.name}: ${stock}; ${reserve}; short by ${core.commas(risk.shortage)}`;
-            });
             const body = [];
             const hazard = satisfactionProjection && satisfactionProjection.hazard;
             const satisfactionTrend = !!(showSatisfactionTrend && !hazard
@@ -462,10 +488,10 @@ export const actionsModule = {
                 body.push(
                     el('div', { class: 'alert alert-warning' }, [
                         el('strong', {}, [`${quantity} would leave insufficient stock `]),
-                        'for the protected upkeep reserve.',
+                        'for the protected upkeep reserve (tick consumption and military upkeep).',
                     ]),
-                    el('ul', { class: 'clop-confirm-risk-list' }, lines.map((line) =>
-                        el('li', {}, [line.replace(/^•\s*/, '')]))),
+                    el('ul', { class: 'clop-confirm-risk-list' },
+                        risks.map(upkeepRiskListItem)),
                 );
             }
             let title = 'Upkeep reserve at risk';
