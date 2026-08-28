@@ -36,6 +36,7 @@
 import { marketAdapter, marketPageUrl, summarizeFriendly } from '../adapters/market.js';
 import { headerBadges, applyHeaderBadges, HEADER_PROBE_PAGE } from '../adapters/header.js';
 import { isLoggedInDoc, login, CRED_KEY } from '../adapters/session.js';
+import { protectedReserve } from '../lib/upkeep-safety.js';
 import { fetchResourceStats } from '../adapters/overview.js';
 import { readFavourites } from '../lib/favourites.js';
 
@@ -155,7 +156,7 @@ export function buyerResourceHasSpare(stats, resourceName, fallback = true) {
     if (!stats || !resourceName) return fallback;
     const resource = stats.byName && stats.byName[String(resourceName).toLowerCase()];
     if (!resource) return fallback;
-    return resource.qty > resource.used + resource.mil;
+    return resource.qty > protectedReserve(resource);
 }
 
 function targetIsActionable(target, snap, stats, previous) {

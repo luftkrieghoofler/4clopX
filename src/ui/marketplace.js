@@ -21,6 +21,8 @@ import {
 import {
     favouriteIds, writeFavourites, writeMarketCatalog, favouriteStorageChange,
 } from '../lib/favourites.js';
+import { protectedReserve, upkeepRiskForChange } from '../lib/upkeep-safety.js';
+import { upkeepWarningContent } from './upkeep-warning.js';
 
 const SIDES = [
     { side: 'sell', label: 'Sell Orders', hint: 'Listings from sellers — buy from them here.' },
@@ -46,10 +48,6 @@ export function unitPriceForSellRevenue(quantity, targetRevenue, sellMultiplier)
     if (!Number.isSafeInteger(price)) return null;
     if (price > 1 && sellRevenueAfterTax(quantity, price - 1, sellMultiplier) >= targetRevenue) price -= 1;
     return price;
-}
-
-export function saleWouldDipBelowReserve(stock, amount, reserve) {
-    return amount > 0 && stock - amount < reserve;
 }
 
 export function orderShouldStayEmphasized(order) {
@@ -296,7 +294,7 @@ export const marketplaceModule = {
             if (side !== 'buyer' || mode) return true;
             const name = resourceName(resourceId).toLowerCase();
             const upkeep = state.upkeep && state.upkeep.byName[name];
-            if (upkeep) return ownedAmount(resourceId) > upkeep.used + upkeep.mil;
+            if (upkeep) return ownedAmount(resourceId) > protectedReserve(upkeep);
             const previous = readFriendlyCache()[`${mode || 'resources'}|${side}|${resourceId}`];
             return previous && typeof previous.available === 'boolean' ? previous.available : true;
         }
@@ -392,7 +390,6 @@ export const marketplaceModule = {
         // 12-hour lump consumption (apples/gems/coffee/gasoline).  The lump
         // is reserved in full — reserving a per-tick average could still
         // starve the military when its deduction lands.
-        const reserveOf = (up) => up.used + up.mil;
         const reserveText = (up) => (up.mil
             ? `${core.commas(up.used)}/tick upkeep + ${core.commas(up.mil)} military/12h`
             : `${core.commas(up.used)}/tick upkeep`);
@@ -431,19 +428,15 @@ export const marketplaceModule = {
         function confirmBelowUpkeep(fresh, name, amount, verb) {
             if (!core.settings.get('market.belowUpkeepSellConfirm')) return true;
             const n = Number(amount);
-            const reserve = reserveOf(fresh);
-            const remaining = fresh.qty - n;
-            if (!saleWouldDipBelowReserve(fresh.qty, n, reserve)) return true;
+            const risk = upkeepRiskForChange(fresh, { name, stockChange: -n });
+            if (!risk) return true;
             const actionText = `${verb} ${core.commas(amount)} ${name}`;
             const gerund = verb === 'List' ? 'Listing' : 'Selling';
             return core.confirm({
                 title: 'Upkeep reserve at risk',
                 body: el('div', {}, [
-                    el('div', { class: 'alert alert-warning' }, [
-                        el('strong', {}, [`${gerund} would dip into your protected reserve. `]),
-                        `${core.commas(Math.max(0, remaining))} ${name} would remain, below the ` +
-                        `${core.commas(reserve)} reserve (${reserveText(fresh)}).`,
-                    ]),
+                    ...upkeepWarningContent(
+                        core, `${gerund} would leave insufficient stock`, [risk]),
                     el('p', {}, [`${actionText} anyway?`]),
                 ]),
                 confirmLabel: `${verb} anyway`,
@@ -495,7 +488,7 @@ export const marketplaceModule = {
             const stats = await fetchResourceStats(core);
             state.upkeep = stats;
             const fresh = stats.byName[name.toLowerCase()];
-            const freshReserve = fresh ? reserveOf(fresh) : null;
+            const freshReserve = fresh ? protectedReserve(fresh) : null;
             if (!fresh || freshReserve !== expected.reserve) {
                 state.messages = {
                     errors: [`${wording.notDone}: the upkeep of ${name} changed — used to be ${core.commas(expected.reserve)}, ` +
@@ -1113,7 +1106,7 @@ export const marketplaceModule = {
                 return btn;
             }
 
-            const reserve = reserveOf(up);
+            const reserve = protectedReserve(up);
             const spare = Math.max(0, have - reserve);
             btn.disabled = spare < 1;
             btn.title = spare < 1
@@ -1275,7 +1268,7 @@ export const marketplaceModule = {
                 return btn;
             }
 
-            const reserve = reserveOf(up);
+            const reserve = protectedReserve(up);
             const spare = have - reserve;
             if (spare >= order.amount) {
                 const btn = sellAll();

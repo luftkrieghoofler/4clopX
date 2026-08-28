@@ -10,7 +10,7 @@ import {
     actionCompatibility, actionNeedsSafetyCheck, projectActionResourceRates,
     projectActionRisks, projectActionSatisfaction,
 } from '../lib/action-safety.js';
-import { upkeepRiskListItem } from './upkeep-warning.js';
+import { upkeepWarningContent } from './upkeep-warning.js';
 
 const SETTING_KEY = 'actions.confirmUpkeepRisk';
 const SATISFACTION_TREND_SETTING_KEY = 'actions.confirmNegativeSatisfactionRate';
@@ -453,14 +453,8 @@ export const actionsModule = {
                 ]));
             }
             if (risks.length) {
-                body.push(
-                    el('div', { class: 'alert alert-warning' }, [
-                        el('strong', {}, [`${quantity} would leave insufficient stock `]),
-                        'for the protected upkeep reserve (tick consumption and military upkeep).',
-                    ]),
-                    el('ul', { class: 'clop-confirm-risk-list' },
-                        risks.map((risk) => upkeepRiskListItem(core, risk))),
-                );
+                body.push(...upkeepWarningContent(
+                    core, `${quantity} would leave insufficient stock`, risks));
             }
             let title = 'Upkeep reserve at risk';
             if (hazard === 'collapse') title = 'Nation collapse risk';

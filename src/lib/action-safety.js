@@ -1,3 +1,5 @@
+import { upkeepRiskForChange } from './upkeep-safety.js';
+
 export function normalizeActionText(text) {
     return String(text || '').replace(/\s+/g, ' ').trim();
 }
@@ -121,33 +123,14 @@ export function projectActionRisks(action, times, stats, buildingUpkeep) {
     const risks = [];
     for (const key of keys) {
         const current = keyed(stats, 'byName', key) || { qty: 0, used: 0, mil: 0 };
-        const stockBefore = Number(current.qty) || 0;
-        const reserveBefore = (Number(current.used) || 0) + (Number(current.mil) || 0);
         const stockChange = stockDelta.get(key) || 0;
         const reserveChange = reserveDelta.get(key) || 0;
-        const stockAfter = stockBefore + stockChange;
-        const reserveAfter = Math.max(0, reserveBefore + reserveChange);
-
-        // The server rejects an unaffordable action instead of allowing a
-        // resource to become negative, so a projected negative inventory is
-        // not an upkeep risk the action can actually create.
-        if (stockAfter < 0) continue;
-
-        // Warn if this action leaves the resource unsafe and is responsible
-        // for making its stock or reserve worse. An unrelated action should
-        // not nag merely because a resource was already below upkeep.
-        if (stockAfter < reserveAfter && (stockChange < 0 || reserveChange > 0)) {
-            risks.push({
-                name: current.name || displayNames.get(key) || key,
-                stockBefore,
-                stockAfter,
-                stockChange,
-                reserveBefore,
-                reserveAfter,
-                reserveChange,
-                shortage: reserveAfter - stockAfter,
-            });
-        }
+        const risk = upkeepRiskForChange(current, {
+            name: current.name || displayNames.get(key) || key,
+            stockChange,
+            reserveChange,
+        });
+        if (risk) risks.push(risk);
     }
     return risks.sort((a, b) => a.name.localeCompare(b.name));
 }

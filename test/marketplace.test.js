@@ -2,8 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import {
-    orderShouldStayEmphasized, saleWouldDipBelowReserve,
-    sellRevenueAfterTax, unitPriceForSellRevenue,
+    orderShouldStayEmphasized, sellRevenueAfterTax, unitPriceForSellRevenue,
 } from '../src/ui/marketplace.js';
 import {
     marketResourceFromLocation, marketResourcesFromDocument,
@@ -55,13 +54,6 @@ test('rejects invalid or unsafe inputs', () => {
     assert.equal(unitPriceForSellRevenue(10, 0, 0.95), null);
     assert.equal(unitPriceForSellRevenue(10, 1000, 0), null);
     assert.equal(unitPriceForSellRevenue(10, Number.MAX_SAFE_INTEGER, 0.01), null);
-});
-
-test('detects sales that cross the protected reserve boundary', () => {
-    assert.equal(saleWouldDipBelowReserve(100, 0, 100), false);
-    assert.equal(saleWouldDipBelowReserve(100, 1, 100), true);
-    assert.equal(saleWouldDipBelowReserve(150, 50, 100), false);
-    assert.equal(saleWouldDipBelowReserve(150, 51, 100), true);
 });
 
 test('keeps alliance, friend, and own orders emphasized', () => {

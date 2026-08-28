@@ -34,3 +34,15 @@ export function upkeepRiskListItem(core, risk) {
         ...details,
     ]);
 }
+
+export function upkeepWarningContent(core, heading, risks) {
+    const el = core.el.bind(core);
+    return [
+        el('div', { class: 'alert alert-warning' }, [
+            el('strong', {}, [heading]),
+            ' for the protected upkeep reserve (tick consumption and military upkeep).',
+        ]),
+        el('ul', { class: 'clop-confirm-risk-list' },
+            risks.map((risk) => upkeepRiskListItem(core, risk))),
+    ];
+}

@@ -1,7 +1,7 @@
 import { incomingDealsFromDocument } from '../adapters/deals.js';
 import { fetchResourceStats } from '../adapters/overview.js';
 import { projectDealRisks } from '../lib/deal-safety.js';
-import { upkeepRiskListItem } from './upkeep-warning.js';
+import { upkeepWarningContent } from './upkeep-warning.js';
 
 const SETTING_KEY = 'deals.confirmBelowUpkeep';
 
@@ -63,14 +63,8 @@ export const dealsModule = {
             return core.confirm({
                 title: 'Upkeep reserve at risk',
                 body: el('div', {}, [
-                    el('div', { class: 'alert alert-warning' }, [
-                        el('strong', {}, [
-                            'Accepting this deal would leave insufficient stock ',
-                        ]),
-                        'for the protected upkeep reserve (tick consumption and military upkeep).',
-                    ]),
-                    el('ul', { class: 'clop-confirm-risk-list' },
-                        risks.map((risk) => upkeepRiskListItem(core, risk))),
+                    ...upkeepWarningContent(
+                        core, 'Accepting this deal would leave insufficient stock', risks),
                     el('p', {}, ['Accept this deal anyway?']),
                 ]),
                 confirmLabel: 'Accept anyway',
