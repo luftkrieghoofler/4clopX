@@ -16,6 +16,8 @@ Install a userscript manager (Violentmonkey, Tampermonkey, or Greasemonkey), the
 
 **Safe actions**: Actions and Favourite Actions are checked against your current stock, upkeep, production, and satisfaction before they run. A confirmation dialogue protects against actions whose construction costs or new upkeep would leave a resource below its protected reserve, create a domestic production deficit, or cause dangerous satisfaction outcomes. The lighter production- and satisfaction-per-tick warnings can be disabled independently. Also shows a reminder for Burn Oil to prevent the classic mistake of burning 5x too much.
 
+**Safe deals**: before accepting an incoming deal, the resources you give and receive are checked against fresh stock and upkeep data. A confirmation protects against accepting a deal that would leave too little stock for tick consumption and military upkeep.
+
 **Marketplace**:
 
 - Sell orders and buy orders become one page with two tabs. Switching sides, switching resources, buying, selling, placing and removing orders all happen in place, without page loads. The stock menu entries still work and open the side they always led to.

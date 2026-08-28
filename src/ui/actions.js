@@ -10,6 +10,7 @@ import {
     actionCompatibility, actionNeedsSafetyCheck, projectActionResourceRates,
     projectActionRisks, projectActionSatisfaction,
 } from '../lib/action-safety.js';
+import { upkeepRiskListItem } from './upkeep-warning.js';
 
 const SETTING_KEY = 'actions.confirmUpkeepRisk';
 const SATISFACTION_TREND_SETTING_KEY = 'actions.confirmNegativeSatisfactionRate';
@@ -345,39 +346,6 @@ export const actionsModule = {
             return value > 0 ? `+${core.commas(value)}` : core.commas(value);
         }
 
-        function upkeepRiskListItem(risk) {
-            const stockChanged = risk.stockBefore !== risk.stockAfter;
-            const consumptionChanged = risk.reserveBefore !== risk.reserveAfter;
-            const change = (label, before, after) => [
-                `${label} ${after < before ? 'decreases' : 'increases'} from `,
-                core.commas(before),
-                ' to ',
-                el('strong', {}, [core.commas(after)]),
-            ];
-            const details = [];
-
-            if (stockChanged) details.push(...change('stock', risk.stockBefore, risk.stockAfter));
-            if (stockChanged && consumptionChanged) details.push(' and ');
-            if (consumptionChanged) {
-                details.push(...change('consumption', risk.reserveBefore, risk.reserveAfter));
-            }
-            if (!stockChanged) {
-                details.push('; current stock is ', core.commas(risk.stockAfter));
-            } else if (!consumptionChanged) {
-                details.push('; current consumption is ', core.commas(risk.reserveAfter));
-            }
-            details.push(
-                ' — short by ',
-                el('strong', {}, [core.commas(risk.shortage)]),
-                ' for next tick.',
-            );
-            return el('li', {}, [
-                el('strong', {}, [`${risk.name}:`]),
-                ' ',
-                ...details,
-            ]);
-        }
-
         function riskConfirmation(action, times, risks, satisfactionProjection, {
             burnOil = null,
             showSatisfactionTrend = true,
@@ -491,7 +459,7 @@ export const actionsModule = {
                         'for the protected upkeep reserve (tick consumption and military upkeep).',
                     ]),
                     el('ul', { class: 'clop-confirm-risk-list' },
-                        risks.map(upkeepRiskListItem)),
+                        risks.map((risk) => upkeepRiskListItem(core, risk))),
                 );
             }
             let title = 'Upkeep reserve at risk';
