@@ -2,7 +2,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import {
-    orderShouldStayEmphasized, sellRevenueAfterTax, unitPriceForSellRevenue,
+    negativeNetConfirmationEnabled, orderShouldStayEmphasized,
+    saleResourceRisks, sellRevenueAfterTax, unitPriceForSellRevenue,
 } from '../src/ui/marketplace.js';
 import {
     marketResourceFromLocation, marketResourcesFromDocument,
@@ -62,6 +63,33 @@ test('keeps alliance, friend, and own orders emphasized', () => {
     assert.equal(orderShouldStayEmphasized({ own: true, relation: null }), true);
     assert.equal(orderShouldStayEmphasized({ own: false, relation: 'enemy' }), false);
     assert.equal(orderShouldStayEmphasized({ own: false, relation: null }), false);
+});
+
+test('applies negative-production confirmation modes to Max and ordinary sales', () => {
+    assert.equal(negativeNetConfirmationEnabled('always', false), true);
+    assert.equal(negativeNetConfirmationEnabled('always', true), true);
+    assert.equal(negativeNetConfirmationEnabled('max', false), false);
+    assert.equal(negativeNetConfirmationEnabled('max', true), true);
+    assert.equal(negativeNetConfirmationEnabled('never', false), false);
+    assert.equal(negativeNetConfirmationEnabled('never', true), false);
+});
+
+test('combines upkeep and imported-stockpile sale risks', () => {
+    const risks = saleResourceRisks({
+        name: 'Oil', qty: 10, used: 5, mil: 0, generated: 0, net: -5,
+    }, 'Oil', 8, { checkNegativeNet: true, checkUpkeep: true });
+
+    assert.equal(risks.upkeep.shortage, 3);
+    assert.deepEqual(risks.negativeNet, { kind: 'imported', net: -5 });
+});
+
+test('does not call a domestically produced net-negative resource imported', () => {
+    const risks = saleResourceRisks({
+        name: 'Oil', qty: 20, used: 8, mil: 0, generated: 5, net: -3,
+    }, 'Oil', 1, { checkNegativeNet: true });
+
+    assert.equal(risks.upkeep, null);
+    assert.deepEqual(risks.negativeNet, { kind: 'shrinking', net: -3 });
 });
 
 test('parses named market resources and comma-formatted stock amounts', () => {

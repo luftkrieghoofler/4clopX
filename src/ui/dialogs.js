@@ -27,6 +27,7 @@ export const dialogsModule = {
             .clop-confirm-actions { text-align: right; }
             .clop-confirm-actions .btn + .btn { margin-left: 6px; }
             .clop-confirm-risk-list { margin: 10px 0 0; padding-left: 22px; }
+            .clop-confirm-risk-list + p { margin-top: 12px; }
         `);
 
         let sequence = 0;
@@ -133,8 +134,7 @@ export const dialogsModule = {
         }
 
         // Serialising dialogs prevents two independent async safety checks
-        // from stacking overlays.  Sequential checks (currently the two
-        // marketplace protections) retain their separate acknowledgements.
+        // from stacking overlays.
         core.confirm = (options) => {
             const result = queue.then(() => show(options));
             queue = result.then(() => undefined, () => undefined);

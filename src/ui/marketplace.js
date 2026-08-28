@@ -24,7 +24,7 @@ import {
 import {
     protectedReserve, reserveSafeMax, upkeepRiskForChange,
 } from '../lib/upkeep-safety.js';
-import { upkeepWarningContent } from './upkeep-warning.js';
+import { upkeepRiskListItem } from './upkeep-warning.js';
 
 const SIDES = [
     { side: 'sell', label: 'Sell Orders', hint: 'Listings from sellers — buy from them here.' },
@@ -56,6 +56,27 @@ export function orderShouldStayEmphasized(order) {
     return !!order.own || order.relation === 'alliance' || order.relation === 'friend';
 }
 
+export function negativeNetConfirmationEnabled(mode, isMaxSale = false) {
+    if (mode === 'never') return false;
+    return mode === 'always' || isMaxSale;
+}
+
+export function saleResourceRisks(resource, name, amount, {
+    checkNegativeNet = false,
+    checkUpkeep = false,
+} = {}) {
+    const net = Number(resource && resource.net);
+    const generated = Number(resource && resource.generated) || 0;
+    return {
+        upkeep: checkUpkeep
+            ? upkeepRiskForChange(resource, { name, stockChange: -Number(amount) })
+            : null,
+        negativeNet: checkNegativeNet && Number.isFinite(net) && net < 0
+            ? { kind: generated > 0 ? 'shrinking' : 'imported', net }
+            : null,
+    };
+}
+
 export const marketplaceModule = {
     name: 'marketplace',
 
@@ -80,7 +101,7 @@ export const marketplaceModule = {
         core.settings.define({
             key: 'market.belowUpkeepSellConfirm',
             label: 'Confirm sales that dip into upkeep',
-            description: 'Ask for confirmation before a non-Max sale or sell listing leaves the resource stockpile below the upkeep and military reserve protected by Sell Max.',
+            description: 'Ask for confirmation before a sale or sell listing leaves the resource stockpile below the upkeep and military reserve protected by Max.',
             type: 'bool',
             default: true,
             section: 'Market',
@@ -380,9 +401,10 @@ export const marketplaceModule = {
         };
 
         /* ---------------- upkeep (Sell Max / Max listing) ----------------
-         * "Used" per tick from the Overview Resources table, fetched once
-         * when either resources market side becomes active (weapons/armor
-         * have no upkeep) and re-verified before every Max-sized sale. */
+         * "Used" per tick from the Overview Resources table, fetched when
+         * either resources market side becomes active (weapons/armor have no
+         * upkeep). Direct Sell Max actions are re-verified; listings use the
+         * normal fresh submit-time warning check. */
 
         const upkeepFor = (resourceId) => (state.upkeep
             ? state.upkeep.byName[resourceName(resourceId).toLowerCase()] || null
@@ -411,45 +433,65 @@ export const marketplaceModule = {
             }
         }
 
-        function confirmNegativeNet(fresh, name, enabled, actionText) {
-            if (fresh.net >= 0 || !enabled) return true;
-            const verb = actionText.split(/\s+/, 1)[0];
-            return core.confirm({
-                title: `Negative ${name} production`,
-                body: el('div', {}, [
-                    el('div', { class: 'alert alert-warning' }, [
-                        el('strong', {}, ['This stockpile is already being drained. ']),
-                        `Your net ${name} production is ${core.commas(fresh.net)}/tick.`,
-                    ]),
-                    el('p', {}, [`${actionText} anyway?`]),
-                ]),
-                confirmLabel: `${verb} anyway`,
+        function confirmSaleRisks(fresh, name, amount, verb, {
+            checkNegativeNet = false,
+            checkUpkeep = false,
+        } = {}) {
+            const risks = saleResourceRisks(fresh, name, amount, {
+                checkNegativeNet, checkUpkeep,
             });
-        }
+            if (!risks.upkeep && !risks.negativeNet) return true;
 
-        function confirmBelowUpkeep(fresh, name, amount, verb) {
-            if (!core.settings.get('market.belowUpkeepSellConfirm')) return true;
-            const n = Number(amount);
-            const risk = upkeepRiskForChange(fresh, { name, stockChange: -n });
-            if (!risk) return true;
             const actionText = `${verb} ${core.commas(amount)} ${name}`;
             const gerund = verb === 'List' ? 'Listing' : 'Selling';
+            const both = !!risks.upkeep && !!risks.negativeNet;
+            const title = both
+                ? 'Resource sale warnings'
+                : risks.upkeep
+                    ? 'Upkeep reserve at risk'
+                    : risks.negativeNet.kind === 'imported'
+                        ? 'Imported stockpile warning'
+                        : 'Shrinking stockpile warning';
+            const heading = both
+                ? [`${gerund} has `, el('strong', {}, ['two resource warnings']), '.']
+                : risks.upkeep
+                    ? [el('strong', {}, [`${gerund} would leave insufficient stock`]),
+                        ' for the protected upkeep reserve (tick consumption and military upkeep).']
+                    : [el('strong', {}, [risks.negativeNet.kind === 'imported'
+                        ? 'Selling off an imported stockpile.'
+                        : 'Selling a stockpile with negative net production.'])];
+            const items = [];
+            if (risks.upkeep) items.push(upkeepRiskListItem(core, risks.upkeep));
+            if (risks.negativeNet) {
+                const detail = risks.negativeNet.kind === 'imported'
+                    ? 'your nation does not produce this resource; make sure you actually intend to sell your imported stockpile.'
+                    : ['your net production is ',
+                        el('strong', {}, [`${core.commas(risks.negativeNet.net)}/tick`]),
+                        '; make sure you actually intend to sell a stockpile that is already shrinking.'];
+                items.push(el('li', {}, [
+                    el('strong', {}, [`${name}:`]),
+                    ' ',
+                    ...(Array.isArray(detail) ? detail : [detail]),
+                ]));
+            }
+
             return core.confirm({
-                title: 'Upkeep reserve at risk',
+                title,
                 body: el('div', {}, [
-                    ...upkeepWarningContent(
-                        core, `${gerund} would leave insufficient stock`, [risk]),
+                    el('div', { class: 'alert alert-warning' }, heading),
+                    el('ul', { class: 'clop-confirm-risk-list' }, items),
                     el('p', {}, [`${actionText} anyway?`]),
                 ]),
                 confirmLabel: `${verb} anyway`,
             });
         }
 
-        // Non-Max sales have independent negative-net and below-upkeep
-        // confirmations.  Refresh the Overview once immediately before acting
+        // Sale submissions have independent negative-net and below-upkeep
+        // confirmations. Refresh the Overview once immediately before acting
         // so both decisions use current data; cancelling preserves form input.
-        function regularSale(resourceId, amount, verb, action) {
-            const checkNet = core.settings.get(NEGATIVE_NET_CONFIRM_KEY) === 'always';
+        function regularSale(resourceId, amount, verb, action, { isMax = false } = {}) {
+            const checkNet = negativeNetConfirmationEnabled(
+                core.settings.get(NEGATIVE_NET_CONFIRM_KEY), isMax);
             const checkUpkeep = core.settings.get('market.belowUpkeepSellConfirm');
             if (mode || (!checkNet && !checkUpkeep)) return run(action);
             if (state.busy) return Promise.resolve();
@@ -461,12 +503,10 @@ export const marketplaceModule = {
                     const stats = await fetchResourceStats(core);
                     state.upkeep = stats;
                     const fresh = stats.byName[name.toLowerCase()];
-                    if (fresh && !(await confirmNegativeNet(fresh, name, checkNet,
-                        `${verb} ${core.commas(amount)} ${name}`))) {
-                        cancelled = true;
-                        return;
-                    }
-                    if (fresh && !(await confirmBelowUpkeep(fresh, name, amount, verb))) {
+                    if (fresh && !(await confirmSaleRisks(fresh, name, amount, verb, {
+                        checkNegativeNet: checkNet,
+                        checkUpkeep,
+                    }))) {
                         cancelled = true;
                         return;
                     }
@@ -481,10 +521,9 @@ export const marketplaceModule = {
             })();
         }
 
-        // Re-fetch the Overview and abort unless upkeep AND the resulting
-        // Max amount still match what the UI promised (protects against
-        // building changes or stock movements in another tab).  Returns
-        // "cancelled" separately so the listing form can retain its inputs.
+        // The direct Sell Max row button performs its sale immediately, so
+        // unlike the listing form's fill-only Max button it still re-fetches
+        // the Overview and aborts unless its promised amount remains safe.
         async function verifyResourceMax(resourceId, expected, wording) {
             const name = resourceName(resourceId);
             const stats = await fetchResourceStats(core);
@@ -519,9 +558,10 @@ export const marketplaceModule = {
                 };
                 return 'changed';
             }
-            if (!(await confirmNegativeNet(fresh, name,
-                core.settings.get(NEGATIVE_NET_CONFIRM_KEY) !== 'never',
-                `${wording.confirmVerb} ${core.commas(expected.n)}`))) return 'cancelled';
+            if (!(await confirmSaleRisks(fresh, name, expected.n, wording.confirmVerb, {
+                checkNegativeNet: negativeNetConfirmationEnabled(
+                    core.settings.get(NEGATIVE_NET_CONFIRM_KEY), true),
+            }))) return 'cancelled';
             return 'ok';
         }
 
@@ -937,7 +977,7 @@ export const marketplaceModule = {
                     : `${DEFAULT_BUY_ORDER_PRICE} (default)`,
             });
             const note = el('span', { class: 'text-muted' });
-            let maxExpected = null;
+            let maxFilledQuantity = null;
 
             const sellRevenue = (q, p) => sellRevenueAfterTax(q, p, state.mult.sell);
             const unitPriceForTotal = (q, target) => unitPriceForSellRevenue(q, target, state.mult.sell);
@@ -959,11 +999,11 @@ export const marketplaceModule = {
                     : ` — ${core.commas(revenue)} bits if all sell`;
             };
             qty.addEventListener('input', () => {
-                maxExpected = null;
+                maxFilledQuantity = null;
                 updateNote();
             });
             price.addEventListener('input', updateNote);
-            const rememberMax = (expected) => { maxExpected = expected; };
+            const rememberMax = (quantity) => { maxFilledQuantity = String(quantity); };
 
             let priceMode = null;
             if (sell) {
@@ -1057,13 +1097,10 @@ export const marketplaceModule = {
                         render();
                         return;
                     }
-                    if (sell && maxExpected && Number(amountValue) === maxExpected.n) {
-                        placeMaxListing(state.activeId, maxExpected, amountValue, priceValue, submit);
-                        return;
-                    }
                     if (sell) {
                         regularSale(state.activeId, amountValue, 'List',
-                            () => adapter().createOrder(state.activeId, amountValue, priceValue));
+                            () => adapter().createOrder(state.activeId, amountValue, priceValue),
+                            { isMax: amountValue === maxFilledQuantity });
                         return;
                     }
                     run(() => adapter().createOrder(state.activeId, amountValue, priceValue));
@@ -1088,17 +1125,18 @@ export const marketplaceModule = {
         }
 
         // The sell-listing Max button uses the same reserve as Sell Max on
-        // buy-order rows.  It only fills the input; the Overview is fetched
-        // again when the form is submitted before anything is listed.
-        function placeMaxButton(qty, updateNote, setExpected) {
+        // buy-order rows. It is only an input convenience: normal submission
+        // checks fresh upkeep and asks for confirmation if this cached value
+        // has since become unsafe.
+        function placeMaxButton(qty, updateNote, markMax) {
             const resourceId = state.activeId;
             const have = ownedAmount(resourceId);
             const btn = el('button', {
                 class: 'btn btn-default clop-place-max', type: 'button',
             }, [bold('Max')]);
-            const fill = (n, expected) => {
+            const fill = (n) => {
                 qty.value = String(n);
-                setExpected(expected);
+                markMax(n);
                 updateNote();
             };
 
@@ -1107,7 +1145,7 @@ export const marketplaceModule = {
                 btn.title = mode
                     ? `Use all ${core.commas(have)} you have`
                     : `Use all ${core.commas(have)} you have; no upkeep data was found for this resource`;
-                btn.addEventListener('click', () => fill(have, null));
+                btn.addEventListener('click', () => fill(have));
                 return btn;
             }
             if (!up) {
@@ -1127,32 +1165,8 @@ export const marketplaceModule = {
             btn.title = spare < 1
                 ? `Nothing to spare: you have ${core.commas(have)} and keep ${core.commas(reserve)} back (${reserveText(up)})`
                 : `Use your ${core.commas(spare)} spare stock and keep ${core.commas(reserve)} back (${reserveText(up)})`;
-            btn.addEventListener('click', () => fill(spare, { reserve, n: spare }));
+            btn.addEventListener('click', () => fill(spare));
             return btn;
-        }
-
-        async function placeMaxListing(resourceId, expected, amount, price, submit) {
-            if (state.busy) return;
-            setBusy(true);
-            submit.textContent = '⟳ Verifying upkeep…';
-            let keepForm = false;
-            try {
-                const verified = await verifyResourceMax(resourceId, expected, {
-                    notDone: 'Not listed', maxLabel: 'Max', verb: 'list', confirmVerb: 'List',
-                });
-                if (verified === 'cancelled') {
-                    keepForm = true;
-                    return;
-                }
-                if (verified !== 'ok') return;
-                merge(await adapter().createOrder(resourceId, amount, price));
-            } catch (e) {
-                state.messages = { errors: [String(e.message || e)], infos: [] };
-            } finally {
-                setBusy(false);
-                if (keepForm) submit.textContent = 'Place on Market';
-                else render();
-            }
         }
 
         function renderOrders() {
