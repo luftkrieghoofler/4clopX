@@ -348,6 +348,13 @@ test('projects Burn Oil quantities and immediate satisfaction loss', () => {
     assert.equal(burnOilOutcome(0, 50), null);
 });
 
+test('catalogues the resource cost of the Max-enabled distribution actions', () => {
+    assert.equal(ACTION_CATALOG[8].items[0].name, 'Apples');
+    assert.equal(ACTION_CATALOG[8].items[0].amount, 5);
+    assert.equal(ACTION_CATALOG[9].items[0].name, 'Pies');
+    assert.equal(ACTION_CATALOG[9].items[0].amount, 1);
+});
+
 test('projects base and nonlinear environmental satisfaction from large builds', () => {
     const effects = {
         6: {

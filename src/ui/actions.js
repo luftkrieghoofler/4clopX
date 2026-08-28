@@ -10,6 +10,7 @@ import {
     actionCompatibility, actionNeedsSafetyCheck, projectActionResourceRates,
     projectActionRisks, projectActionSatisfaction,
 } from '../lib/action-safety.js';
+import { protectedReserve, reserveSafeMax } from '../lib/upkeep-safety.js';
 import { upkeepWarningContent } from './upkeep-warning.js';
 
 const SETTING_KEY = 'actions.confirmUpkeepRisk';
@@ -21,6 +22,7 @@ const CRITICAL_TICK_SECONDS = 90;
 const BURN_OIL_ACTION_ID = '4';
 const BURN_OIL_UNITS_PER_ACTION = 5;
 const BURN_OIL_SAT_PER_ACTION = 5;
+const MAX_DISTRIBUTION_ACTION_IDS = new Set(['8', '9']);
 
 export function burnOilOutcome(times, satisfaction) {
     if (!Number.isSafeInteger(times) || times < 1 || !Number.isFinite(satisfaction)) return null;
@@ -92,6 +94,8 @@ export const actionsModule = {
             .clop-action-satisfaction-summary strong { font-size: 110%; }
             .clop-action-collapse-risk { border-width: 2px; }
             .clop-burn-oil-risk-suggestion { margin-top: 8px; }
+            .clop-action-max-input { border-top-right-radius: 0; border-bottom-right-radius: 0; }
+            .clop-action-max-button { margin-left: -1px; border-top-left-radius: 0; border-bottom-left-radius: 0; vertical-align: top; }
             form.clop-action-checking { opacity: .7; pointer-events: none; }
         `);
 
@@ -216,6 +220,54 @@ export const actionsModule = {
                 setVisible(editedFromDefault);
             });
             update();
+        }
+
+        function annotateDistributionMax(record, state) {
+            if (!MAX_DISTRIBUTION_ACTION_IDS.has(record.id) || state.status !== 'verified') return;
+            const input = record.form.querySelector('input[name="times"][type="text"]');
+            if (!input || record.form.querySelector('.clop-action-max-button')) return;
+            const item = state.expected.items.find((candidate) =>
+                candidate.consumed && !candidate.isBuilding);
+            if (!item) return;
+
+            input.classList.add('clop-action-max-input');
+            const button = el('button', {
+                class: 'btn btn-default clop-action-max-button',
+                type: 'button',
+                title: `Use the ${item.name} spare above tick consumption and military upkeep`,
+            }, [el('strong', {}, ['Max'])]);
+            input.insertAdjacentElement('afterend', button);
+
+            button.addEventListener('click', async () => {
+                if (button.disabled) return;
+                button.disabled = true;
+                button.textContent = '…';
+                try {
+                    const stats = await fetchResourceStats(core);
+                    // Resources with no stock, production, or upkeep may be
+                    // omitted from the Overview table; that is a known zero,
+                    // rather than a failed Max calculation.
+                    const resource = stats.byName[item.name.toLowerCase()]
+                        || { qty: 0, used: 0, mil: 0 };
+                    const reserve = protectedReserve(resource);
+                    const max = reserveSafeMax(resource.qty, reserve, item.amount);
+                    if (max === null) throw new Error(`${item.name} stock or upkeep could not be read`);
+
+                    input.value = String(max);
+                    input.dispatchEvent(new Event('input', { bubbles: true }));
+                    button.title = max > 0
+                        ? `Set ${core.commas(max)} action${max === 1 ? '' : 's'}, consuming ` +
+                            `${core.commas(max * item.amount)} ${item.name} and keeping ` +
+                            `${core.commas(reserve)} reserved`
+                        : `No ${item.name} are spare above the ${core.commas(reserve)} reserve`;
+                } catch (error) {
+                    console.warn(`[4clopX] ${state.expected.name} Max failed:`, error);
+                    button.title = `Could not calculate Max: ${String(error.message || error)}. Click to retry.`;
+                } finally {
+                    button.disabled = false;
+                    button.replaceChildren(el('strong', {}, ['Max']));
+                }
+            });
         }
 
         function renderSummary() {
@@ -585,6 +637,7 @@ export const actionsModule = {
                 const state = stateFor(record.id, actualActions);
                 annotateForm(record, state);
                 annotateBurnOil(record, state);
+                annotateDistributionMax(record, state);
             }
             renderSummary();
         });

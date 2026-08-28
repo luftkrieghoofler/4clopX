@@ -9,6 +9,15 @@ export function protectedReserve(resource) {
     return Number.isSafeInteger(reserve) ? reserve : null;
 }
 
+// Largest whole number of operations that can consume amountPerUse while
+// leaving the protected reserve untouched.  Market sales use one unit per
+// operation; actions such as Distribute Apples can consume several.
+export function reserveSafeMax(stock, reserve, amountPerUse = 1) {
+    if (![stock, reserve, amountPerUse].every(Number.isSafeInteger)
+        || stock < 0 || reserve < 0 || amountPerUse < 1) return null;
+    return Math.floor(Math.max(0, stock - reserve) / amountPerUse);
+}
+
 export function upkeepRiskForChange(resource, {
     name = resource && resource.name,
     stockChange = 0,

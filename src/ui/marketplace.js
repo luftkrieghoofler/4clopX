@@ -21,7 +21,9 @@ import {
 import {
     favouriteIds, writeFavourites, writeMarketCatalog, favouriteStorageChange,
 } from '../lib/favourites.js';
-import { protectedReserve, upkeepRiskForChange } from '../lib/upkeep-safety.js';
+import {
+    protectedReserve, reserveSafeMax, upkeepRiskForChange,
+} from '../lib/upkeep-safety.js';
 import { upkeepWarningContent } from './upkeep-warning.js';
 
 const SIDES = [
@@ -498,7 +500,15 @@ export const marketplaceModule = {
                 };
                 return 'changed';
             }
-            const freshSpare = Math.max(0, fresh.qty - freshReserve);
+            const freshSpare = reserveSafeMax(fresh.qty, freshReserve);
+            if (freshSpare === null) {
+                state.messages = {
+                    errors: [`${wording.notDone}: the stock or upkeep of ${name} could not be read. ` +
+                        'Check the numbers and try again if you\'re happy.'],
+                    infos: [],
+                };
+                return 'changed';
+            }
             const freshMax = expected.cap == null ? freshSpare : Math.min(freshSpare, expected.cap);
             if (freshMax !== expected.n) {
                 state.messages = {
@@ -1107,7 +1117,12 @@ export const marketplaceModule = {
             }
 
             const reserve = protectedReserve(up);
-            const spare = Math.max(0, have - reserve);
+            const spare = reserveSafeMax(have, reserve);
+            if (spare === null) {
+                btn.disabled = true;
+                btn.title = 'Could not calculate the stock available above upkeep';
+                return btn;
+            }
             btn.disabled = spare < 1;
             btn.title = spare < 1
                 ? `Nothing to spare: you have ${core.commas(have)} and keep ${core.commas(reserve)} back (${reserveText(up)})`
@@ -1269,7 +1284,15 @@ export const marketplaceModule = {
             }
 
             const reserve = protectedReserve(up);
-            const spare = have - reserve;
+            const spare = reserveSafeMax(have, reserve);
+            if (spare === null) {
+                const btn = el('button', {
+                    class: 'btn btn-info btn-sm clop-sellbtn', type: 'button',
+                }, [bold('Sell Max')]);
+                btn.disabled = true;
+                btn.title = 'Could not calculate the stock available above upkeep';
+                return btn;
+            }
             if (spare >= order.amount) {
                 const btn = sellAll();
                 btn.title = `Fills the whole order and leaves your reserve of ${core.commas(reserve)} ` +

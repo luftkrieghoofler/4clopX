@@ -1,11 +1,21 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { protectedReserve, upkeepRiskForChange } from '../src/lib/upkeep-safety.js';
+import {
+    protectedReserve, reserveSafeMax, upkeepRiskForChange,
+} from '../src/lib/upkeep-safety.js';
 
 test('combines tick consumption and military upkeep into one reserve', () => {
     assert.equal(protectedReserve({ used: 20, mil: 4 }), 24);
     assert.equal(protectedReserve({ used: 20 }), 20);
+});
+
+test('calculates the largest whole operation count above a reserve', () => {
+    assert.equal(reserveSafeMax(24, 4, 5), 4);
+    assert.equal(reserveSafeMax(23, 4, 5), 3);
+    assert.equal(reserveSafeMax(24, 4), 20);
+    assert.equal(reserveSafeMax(3, 4), 0);
+    assert.equal(reserveSafeMax(10, 2, 0), null);
 });
 
 test('classifies a stock change that crosses the protected reserve', () => {
