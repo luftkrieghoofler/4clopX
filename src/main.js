@@ -1,5 +1,6 @@
 import { core } from './core.js';
 import { dialogsModule } from './ui/dialogs.js';
+import { feedbackModule } from './ui/feedback.js';
 import { autologinModule } from './ui/autologin.js';
 import { shortcutsModule } from './ui/shortcuts.js';
 import { overviewModule } from './ui/overview.js';
@@ -17,6 +18,7 @@ import { settingsModule } from './ui/settings.js';
 // already exist.  settings last, so its panel sees every module's registered
 // settings (and its ⚙ lands leftmost in the navbar group).
 core.register(dialogsModule);
+core.register(feedbackModule);
 core.register(autologinModule);
 core.register(shortcutsModule);
 core.register(overviewModule);

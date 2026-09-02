@@ -35,6 +35,7 @@ export const dialogsModule = {
 
         function show(options = {}) {
             return new Promise((resolve) => {
+                const alertOnly = options.alertOnly === true;
                 const previousFocus = document.activeElement;
                 const id = `clop-confirm-title-${++sequence}`;
                 const bodyId = `clop-confirm-body-${sequence}`;
@@ -46,8 +47,8 @@ export const dialogsModule = {
 
                 const cancel = core.el('button', {
                     type: 'button',
-                    class: 'btn btn-default',
-                }, [options.cancelLabel || 'Cancel']);
+                    class: `btn ${alertOnly ? 'btn-primary' : 'btn-default'}`,
+                }, [alertOnly ? (options.dismissLabel || 'Close') : (options.cancelLabel || 'Cancel')]);
                 const proceed = core.el('button', {
                     type: 'button',
                     class: `btn ${options.confirmClass || 'btn-danger'}`,
@@ -55,7 +56,7 @@ export const dialogsModule = {
                 const close = core.el('button', {
                     type: 'button',
                     class: 'close',
-                    'aria-label': 'Cancel',
+                    'aria-label': alertOnly ? 'Dismiss' : 'Cancel',
                     html: '&times;',
                 });
                 const panel = core.el('div', {
@@ -70,7 +71,8 @@ export const dialogsModule = {
                         core.el('strong', { id }, [options.title || 'Please confirm']),
                     ]),
                     body,
-                    core.el('div', { class: 'panel-footer clop-confirm-actions' }, [cancel, proceed]),
+                    core.el('div', { class: 'panel-footer clop-confirm-actions' },
+                        alertOnly ? [cancel] : [cancel, proceed]),
                 ]);
                 const overlay = core.el('div', { class: 'clop-confirm-overlay' }, [panel]);
 
@@ -115,7 +117,7 @@ export const dialogsModule = {
 
                 cancel.addEventListener('click', () => finish(false));
                 close.addEventListener('click', () => finish(false));
-                proceed.addEventListener('click', () => finish(true));
+                if (!alertOnly) proceed.addEventListener('click', () => finish(true));
                 overlay.addEventListener('click', (event) => {
                     if (event.target === overlay) finish(false);
                 });
@@ -124,7 +126,11 @@ export const dialogsModule = {
                 document.body.appendChild(overlay);
                 if (options.onOpen) {
                     try {
-                        cleanup = options.onOpen({ overlay, panel, body, proceed, cancel }) || null;
+                        cleanup = options.onOpen({
+                            overlay, panel, body,
+                            proceed: alertOnly ? null : proceed,
+                            cancel,
+                        }) || null;
                     } catch (error) {
                         console.warn('[4clopX] confirmation setup failed:', error);
                     }
@@ -137,6 +143,11 @@ export const dialogsModule = {
         // from stacking overlays.
         core.confirm = (options) => {
             const result = queue.then(() => show(options));
+            queue = result.then(() => undefined, () => undefined);
+            return result;
+        };
+        core.alert = (options) => {
+            const result = queue.then(() => show({ ...options, alertOnly: true }));
             queue = result.then(() => undefined, () => undefined);
             return result;
         };

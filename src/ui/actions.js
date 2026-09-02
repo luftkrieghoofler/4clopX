@@ -355,23 +355,34 @@ export const actionsModule = {
                 if (!isLoggedInDoc(response)) throw new Error('The game session has expired.');
             } catch (error) {
                 console.warn('[4clopX] favourite action request failed:', error);
-                core.overview.showError(
+                core.feedback.error(
                     `Could not confirm whether the ${removing ? 'removal' : 'action'} succeeded ` +
-                    `(${String(error.message || error)}). Reload the Overview before trying again.`);
+                    `(${String(error.message || error)}). Reload the Overview before trying again.`, {
+                        title: removing ? 'Favourite removal failed' : 'Action request failed',
+                    });
                 return;
             }
 
             try {
                 await core.overview.refresh();
-                core.overview.showMessages(response);
+                core.feedback.fromDocument(response, {
+                    successTitle: removing ? 'Favourite removed' : 'Action complete',
+                    errorTitle: removing ? 'Could not remove favourite' : 'Action failed',
+                    fallbackMessage: removing
+                        ? 'The favourite was removed.'
+                        : 'The action was processed.',
+                });
             } catch (error) {
                 // The POST may already have succeeded.  Preserve its server
                 // feedback, but explicitly discourage a blind retry while
                 // the visible data and single-use token may be stale.
-                core.overview.showMessages(response);
-                core.overview.showError(
-                    `The server answered, but the Overview could not be refreshed ` +
-                    `(${String(error.message || error)}). Reload the page before trying again.`);
+                core.feedback.fromDocument(response, {
+                    errorTitle: 'Overview refresh failed',
+                    additionalErrors: [
+                        `The server answered, but the Overview could not be refreshed ` +
+                        `(${String(error.message || error)}). Reload the page before trying again.`,
+                    ],
+                });
                 console.warn('[4clopX] Overview refresh after favourite action failed:', error);
             }
         }

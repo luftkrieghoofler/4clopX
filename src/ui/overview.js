@@ -59,39 +59,7 @@ export const overviewModule = {
         let signature = overviewContentSignature(document);
         let networkRefresh = null;
 
-        function clearMessages() {
-            for (const message of document.querySelectorAll(
-                '#content > .clop-overview-response-message')) message.remove();
-        }
-
-        function showMessages(sourceDoc) {
-            clearMessages();
-            const source = sourceDoc && sourceDoc.querySelector
-                && sourceDoc.querySelector('#content');
-            const content = document.querySelector('#content');
-            if (!source || !content) return 0;
-            const messages = [...source.querySelectorAll(':scope > .alert-danger, :scope > .alert-info')]
-                .map((message) => {
-                    const copy = document.importNode(message, true);
-                    copy.classList.add('clop-overview-response-message');
-                    return copy;
-                });
-            content.prepend(...messages);
-            return messages.length;
-        }
-
-        function showError(message) {
-            const content = document.querySelector('#content');
-            if (!content) return;
-            content.prepend(core.el('div', {
-                class: 'alert alert-danger clop-overview-response-message',
-            }, [message]));
-        }
-
         function applyDocument(sourceDoc) {
-            // Dynamic-operation feedback lives until the next refresh, just
-            // like the stock game's post/redirect messages.
-            clearMessages();
             const result = replaceOverviewContent(document, sourceDoc, signature);
             signature = result.signature;
             if (!result.available) {
@@ -125,7 +93,7 @@ export const overviewModule = {
 
         // Public seam for the upcoming in-place favourite-action and building
         // mutations: after their POST, they can call this same refresh path.
-        core.overview = { refresh, applyDocument, showMessages, showError };
+        core.overview = { refresh, applyDocument };
 
         core.events.on('overview:document', ({ document: sourceDoc } = {}) => {
             if (!sourceDoc) return;
