@@ -17,7 +17,8 @@ import {
     projectActionRisks, projectActionSatisfaction, SATISFACTION_SAFETY_MODES,
 } from '../src/lib/action-safety.js';
 import {
-    actionsModule, burnOilOutcome, SATISFACTION_SAFETY_MODE_SETTING_KEY,
+    actionsModule, burnOilOutcome, isDynamicFavouriteSubmission,
+    SATISFACTION_SAFETY_MODE_SETTING_KEY,
 } from '../src/ui/actions.js';
 
 test('pairs original action mechanics with their original descriptions', () => {
@@ -622,6 +623,26 @@ test('does not mistake embedded favourite-removal controls for performed actions
     assert.deepEqual(submittedAction(form, { name: 'perform' }), {
         id: '40', times: 3,
     });
+});
+
+test('makes perform and remove submissions dynamic only in Overview favourites', () => {
+    const favouriteForm = {
+        querySelector: (selector) => selector === 'input[name="token_favoriteactions"]'
+            ? { value: 'token' }
+            : null,
+    };
+    const ordinaryForm = { querySelector: () => null };
+
+    assert.equal(isDynamicFavouriteSubmission(
+        'overview.php', favouriteForm, { name: 'perform' }), true);
+    assert.equal(isDynamicFavouriteSubmission(
+        'overview.php', favouriteForm, { name: 'remove' }), true);
+    assert.equal(isDynamicFavouriteSubmission(
+        'overview.php', favouriteForm, null), true, 'Enter-key submission performs the action');
+    assert.equal(isDynamicFavouriteSubmission(
+        'favoriteactions.php', favouriteForm, { name: 'perform' }), false);
+    assert.equal(isDynamicFavouriteSubmission(
+        'overview.php', ordinaryForm, { name: 'perform' }), false);
 });
 
 test('reads the stock game tick countdown and applies a strict ten-minute threshold', () => {

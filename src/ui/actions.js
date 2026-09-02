@@ -5,6 +5,7 @@ import {
     formatTickDuration, tickIsCritical, tickIsImminent, tickSecondsFromDocument,
 } from '../adapters/header.js';
 import { fetchResourceStats } from '../adapters/overview.js';
+import { isLoggedInDoc } from '../adapters/session.js';
 import { ACTION_CATALOG, BUILDING_EFFECTS, BUILDING_UPKEEP } from '../data/actions.generated.js';
 import {
     actionCompatibility, actionNeedsSafetyCheck, projectActionResourceRates,
@@ -38,6 +39,12 @@ export function burnOilOutcome(times, satisfaction) {
         satisfactionLost,
         satisfactionAfter,
     };
+}
+
+export function isDynamicFavouriteSubmission(page, form, submitter) {
+    if (page !== 'overview.php' || !form || !form.querySelector(
+        'input[name="token_favoriteactions"]')) return false;
+    return !submitter || submitter.name === 'perform' || submitter.name === 'remove';
 }
 
 export const actionsModule = {
@@ -92,8 +99,8 @@ export const actionsModule = {
     init(core) {
         const page = location.pathname.replace(/^.*\//, '');
         const el = core.el.bind(core);
-        const forms = actionFormsFromDocument(document);
         const states = new Map();
+        const boundForms = new WeakSet();
         let loadError = null;
 
         core.addStyle(`
@@ -284,10 +291,12 @@ export const actionsModule = {
             });
         }
 
-        function renderSummary() {
+        function renderSummary(forms) {
             document.querySelector('#clop-action-compat-summary')?.remove();
+            const visibleIds = new Set(forms.map((record) => record.id));
             const affected = [...states.values()].filter((state) =>
-                state.status === 'unknown' || state.status === 'changed');
+                visibleIds.has(state.id)
+                && (state.status === 'unknown' || state.status === 'changed'));
             if (!affected.length) return;
             const names = affected.map((state) =>
                 (state.actual && state.actual.name) || (state.expected && state.expected.name) || `Action #${state.id}`);
@@ -321,8 +330,50 @@ export const actionsModule = {
             }
         }
 
-        function submitNatively(form) {
-            HTMLFormElement.prototype.submit.call(form);
+        function setSubmitterLabel(submitter, label) {
+            if (!submitter) return;
+            if ('value' in submitter) submitter.value = label;
+            else submitter.textContent = label;
+        }
+
+        async function submitForm(form, submitter) {
+            if (!isDynamicFavouriteSubmission(page, form, submitter) || !core.overview) {
+                HTMLFormElement.prototype.submit.call(form);
+                return;
+            }
+
+            const removing = submitter && submitter.name === 'remove';
+            const submitterValue = submitter && (submitter.dataset.clopOldLabel
+                || submitter.value || submitter.textContent);
+            setSubmitterLabel(submitter, removing ? 'Removing…' : 'Performing…');
+            let response;
+            try {
+                const params = new FormData(form);
+                if (submitter && submitter.name) params.append(submitter.name, submitterValue);
+                response = await core.http.postForm(
+                    form.getAttribute('action') || 'favoriteactions.php', params);
+                if (!isLoggedInDoc(response)) throw new Error('The game session has expired.');
+            } catch (error) {
+                console.warn('[4clopX] favourite action request failed:', error);
+                core.overview.showError(
+                    `Could not confirm whether the ${removing ? 'removal' : 'action'} succeeded ` +
+                    `(${String(error.message || error)}). Reload the Overview before trying again.`);
+                return;
+            }
+
+            try {
+                await core.overview.refresh();
+                core.overview.showMessages(response);
+            } catch (error) {
+                // The POST may already have succeeded.  Preserve its server
+                // feedback, but explicitly discourage a blind retry while
+                // the visible data and single-use token may be stale.
+                core.overview.showMessages(response);
+                core.overview.showError(
+                    `The server answered, but the Overview could not be refreshed ` +
+                    `(${String(error.message || error)}). Reload the page before trying again.`);
+                console.warn('[4clopX] Overview refresh after favourite action failed:', error);
+            }
         }
 
         function actionConfirm(options) {
@@ -546,121 +597,145 @@ export const actionsModule = {
             });
         }
 
-        for (const record of forms) {
-            let clickedSubmitter = null;
-            record.form.addEventListener('click', (event) => {
-                const submitter = event.target.closest('input[type="submit"], button[type="submit"]');
-                if (submitter && submitter.form === record.form) clickedSubmitter = submitter;
-            });
-            record.form.addEventListener('submit', async (event) => {
-                const submitter = event.submitter || clickedSubmitter;
-                clickedSubmitter = null;
-                const submission = submittedAction(record.form, submitter);
-                if (!submission || !core.settings.get(SETTING_KEY)) return;
-                event.preventDefault();
-                if (record.form.classList.contains('clop-action-checking')) return;
-                setChecking(record.form, submitter, true);
+        function bindForms() {
+            const forms = actionFormsFromDocument(document);
+            for (const record of forms) {
+                if (boundForms.has(record.form)) continue;
+                boundForms.add(record.form);
+                let clickedSubmitter = null;
+                record.form.addEventListener('click', (event) => {
+                    const submitter = event.target.closest('input[type="submit"], button[type="submit"]');
+                    if (submitter && submitter.form === record.form) clickedSubmitter = submitter;
+                });
+                record.form.addEventListener('submit', async (event) => {
+                    const submitter = event.submitter || clickedSubmitter;
+                    clickedSubmitter = null;
+                    const submission = submittedAction(record.form, submitter);
+                    const dynamic = isDynamicFavouriteSubmission(page, record.form, submitter)
+                        && !!core.overview;
+                    if (!submission || !core.settings.get(SETTING_KEY)) {
+                        if (!dynamic) return;
+                        event.preventDefault();
+                        if (record.form.classList.contains('clop-action-checking')) return;
+                        setChecking(record.form, submitter, true);
+                        try {
+                            await submitForm(record.form, submitter);
+                        } finally {
+                            setChecking(record.form, submitter, false);
+                        }
+                        return;
+                    }
+                    event.preventDefault();
+                    if (record.form.classList.contains('clop-action-checking')) return;
+                    setChecking(record.form, submitter, true);
 
-                try {
-                    const actualActions = await actualActionsPromise;
-                    const state = stateFor(record.id, actualActions);
-                    if (state.status === 'changed' || state.status === 'unknown') {
-                        if (await unprotectedConfirmation(state)) submitNatively(record.form);
-                        return;
-                    }
-                    if (state.status !== 'verified') {
-                        const detail = loadError ? ` (${String(loadError.message || loadError)})` : '';
-                        if (await actionConfirm({
-                            title: 'Action safety unavailable',
-                            body: [
-                                el('div', { class: 'alert alert-danger' }, [
-                                    `4clopX could not load the live description for this action${detail}.`,
-                                ]),
-                                el('p', {}, ['Perform it without safe-action protection?']),
-                            ],
-                            confirmLabel: 'Perform anyway',
-                        })) submitNatively(record.form);
-                        return;
-                    }
-                    if (submission.times < 1) {
-                        submitNatively(record.form); // Let the server show its normal validation error.
-                        return;
-                    }
-                    if (!Number.isSafeInteger(submission.times)) {
-                        if (await actionConfirm({
-                            title: 'Action quantity cannot be checked',
-                            body: [
-                                el('div', { class: 'alert alert-danger' }, [
-                                    'The action quantity is too large for 4clopX to calculate safely.',
-                                ]),
-                                el('p', {}, ['Perform it without safe-action protection?']),
-                            ],
-                            confirmLabel: 'Perform anyway',
-                        })) submitNatively(record.form);
-                        return;
-                    }
-                    if (!actionNeedsSafetyCheck(state.expected, BUILDING_UPKEEP, BUILDING_EFFECTS)) {
-                        submitNatively(record.form);
-                        return;
-                    }
-
-                    let stats;
                     try {
-                        stats = await fetchResourceStats(core);
-                    } catch (error) {
-                        if (await actionConfirm({
-                            title: 'Current stock could not be checked',
-                            body: [
-                                el('div', { class: 'alert alert-danger' }, [
-                                    `4clopX could not load your current stock and upkeep ` +
-                                    `(${String(error.message || error)}).`,
-                                ]),
-                                el('p', {}, ['Perform this action without safe-action protection?']),
-                            ],
-                            confirmLabel: 'Perform anyway',
-                        })) submitNatively(record.form);
-                        return;
+                        const actualActions = await actualActionsPromise;
+                        const state = stateFor(record.id, actualActions);
+                        if (state.status === 'changed' || state.status === 'unknown') {
+                            if (await unprotectedConfirmation(state)) {
+                                await submitForm(record.form, submitter);
+                            }
+                            return;
+                        }
+                        if (state.status !== 'verified') {
+                            const detail = loadError ? ` (${String(loadError.message || loadError)})` : '';
+                            if (await actionConfirm({
+                                title: 'Action safety unavailable',
+                                body: [
+                                    el('div', { class: 'alert alert-danger' }, [
+                                        `4clopX could not load the live description for this action${detail}.`,
+                                    ]),
+                                    el('p', {}, ['Perform it without safe-action protection?']),
+                                ],
+                                confirmLabel: 'Perform anyway',
+                            })) await submitForm(record.form, submitter);
+                            return;
+                        }
+                        if (submission.times < 1) {
+                            // Let the server show its normal validation error.
+                            await submitForm(record.form, submitter);
+                            return;
+                        }
+                        if (!Number.isSafeInteger(submission.times)) {
+                            if (await actionConfirm({
+                                title: 'Action quantity cannot be checked',
+                                body: [
+                                    el('div', { class: 'alert alert-danger' }, [
+                                        'The action quantity is too large for 4clopX to calculate safely.',
+                                    ]),
+                                    el('p', {}, ['Perform it without safe-action protection?']),
+                                ],
+                                confirmLabel: 'Perform anyway',
+                            })) await submitForm(record.form, submitter);
+                            return;
+                        }
+                        if (!actionNeedsSafetyCheck(state.expected, BUILDING_UPKEEP, BUILDING_EFFECTS)) {
+                            await submitForm(record.form, submitter);
+                            return;
+                        }
+
+                        let stats;
+                        try {
+                            stats = await fetchResourceStats(core);
+                        } catch (error) {
+                            if (await actionConfirm({
+                                title: 'Current stock could not be checked',
+                                body: [
+                                    el('div', { class: 'alert alert-danger' }, [
+                                        `4clopX could not load your current stock and upkeep ` +
+                                        `(${String(error.message || error)}).`,
+                                    ]),
+                                    el('p', {}, ['Perform this action without safe-action protection?']),
+                                ],
+                                confirmLabel: 'Perform anyway',
+                            })) await submitForm(record.form, submitter);
+                            return;
+                        }
+                        const risks = projectActionRisks(
+                            state.expected, submission.times, stats, BUILDING_UPKEEP);
+                        const satisfactionProjection = projectActionSatisfaction(
+                            state.expected, submission.times, stats, BUILDING_EFFECTS,
+                            core.settings.get(SATISFACTION_SAFETY_MODE_SETTING_KEY));
+                        const showSatisfactionTrend = !!core.settings.get(
+                            SATISFACTION_TREND_SETTING_KEY);
+                        const resourceRateRisks = core.settings.get(RESOURCE_TREND_SETTING_KEY)
+                            ? projectActionResourceRates(
+                                state.expected, submission.times, stats,
+                                BUILDING_UPKEEP, BUILDING_EFFECTS)
+                            : [];
+                        const burnOil = record.id === BURN_OIL_ACTION_ID
+                            ? burnOilOutcome(submission.times, stats.satisfaction)
+                            : null;
+                        const satisfactionRisk = satisfactionProjection
+                            && (satisfactionProjection.hazard
+                                || (showSatisfactionTrend && satisfactionProjection.trendRisk));
+                        if ((!risks.length && !satisfactionRisk && !resourceRateRisks.length)
+                            || await riskConfirmation(
+                                state.expected, submission.times, risks, satisfactionProjection, {
+                                    burnOil, showSatisfactionTrend, resourceRateRisks,
+                                })) {
+                            await submitForm(record.form, submitter);
+                        }
+                    } finally {
+                        setChecking(record.form, submitter, false);
                     }
-                    const risks = projectActionRisks(
-                        state.expected, submission.times, stats, BUILDING_UPKEEP);
-                    const satisfactionProjection = projectActionSatisfaction(
-                        state.expected, submission.times, stats, BUILDING_EFFECTS,
-                        core.settings.get(SATISFACTION_SAFETY_MODE_SETTING_KEY));
-                    const showSatisfactionTrend = !!core.settings.get(
-                        SATISFACTION_TREND_SETTING_KEY);
-                    const resourceRateRisks = core.settings.get(RESOURCE_TREND_SETTING_KEY)
-                        ? projectActionResourceRates(
-                            state.expected, submission.times, stats,
-                            BUILDING_UPKEEP, BUILDING_EFFECTS)
-                        : [];
-                    const burnOil = record.id === BURN_OIL_ACTION_ID
-                        ? burnOilOutcome(submission.times, stats.satisfaction)
-                        : null;
-                    const satisfactionRisk = satisfactionProjection
-                        && (satisfactionProjection.hazard
-                            || (showSatisfactionTrend && satisfactionProjection.trendRisk));
-                    if ((!risks.length && !satisfactionRisk && !resourceRateRisks.length)
-                        || await riskConfirmation(
-                            state.expected, submission.times, risks, satisfactionProjection, {
-                                burnOil, showSatisfactionTrend, resourceRateRisks,
-                            })) {
-                        submitNatively(record.form);
-                    }
-                } finally {
-                    setChecking(record.form, submitter, false);
+                });
+            }
+
+            actualActionsPromise.then((actualActions) => {
+                if (!actualActions) return;
+                for (const record of forms) {
+                    const state = stateFor(record.id, actualActions);
+                    annotateForm(record, state);
+                    annotateBurnOil(record, state);
+                    annotateDistributionMax(record, state);
                 }
+                renderSummary(forms);
             });
         }
 
-        actualActionsPromise.then((actualActions) => {
-            if (!actualActions) return;
-            for (const record of forms) {
-                const state = stateFor(record.id, actualActions);
-                annotateForm(record, state);
-                annotateBurnOil(record, state);
-                annotateDistributionMax(record, state);
-            }
-            renderSummary();
-        });
+        bindForms();
+        core.events.on('overview:contentReplaced', bindForms);
     },
 };

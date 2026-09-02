@@ -15,6 +15,58 @@ import {
     isOverviewDestination, liveUpdatesModule, overviewMenuAnchors,
     overviewMenuBadgeCounts, resourceBufferTitleMarker,
 } from '../src/ui/liveupdates.js';
+import {
+    overviewContentSignature, overviewModule, replaceOverviewContent,
+} from '../src/ui/overview.js';
+
+test('Overview live rendering is scoped to the Overview page', () => {
+    assert.equal(overviewModule.matches('overview.php'), true);
+    assert.equal(overviewModule.matches('favoriteactions.php'), false);
+    assert.equal(overviewModule.matches('reports.php'), false);
+});
+
+test('replaces the stock Overview content only when its fetched HTML changes', () => {
+    const currentContent = {
+        innerHTML: '<p>old</p>',
+        replaceChildren(...children) { this.replacement = children; },
+    };
+    const sourceContent = {
+        innerHTML: '<p>new</p>',
+        childNodes: [{ id: 'heading' }, { id: 'panels' }],
+    };
+    const imported = [];
+    const currentDoc = {
+        querySelector: (selector) => selector === '#content' ? currentContent : null,
+        importNode(node, deep) {
+            const copy = { copyOf: node.id, deep };
+            imported.push(copy);
+            return copy;
+        },
+    };
+    const sourceDoc = {
+        querySelector: (selector) => selector === '#content' ? sourceContent : null,
+    };
+
+    assert.equal(overviewContentSignature(currentDoc), '<p>old</p>');
+    assert.deepEqual(replaceOverviewContent(currentDoc, sourceDoc, '<p>old</p>'), {
+        available: true,
+        changed: true,
+        signature: '<p>new</p>',
+    });
+    assert.deepEqual(currentContent.replacement, imported);
+    assert.deepEqual(imported, [
+        { copyOf: 'heading', deep: true },
+        { copyOf: 'panels', deep: true },
+    ]);
+
+    delete currentContent.replacement;
+    assert.deepEqual(replaceOverviewContent(currentDoc, sourceDoc, '<p>new</p>'), {
+        available: true,
+        changed: false,
+        signature: '<p>new</p>',
+    });
+    assert.equal(currentContent.replacement, undefined);
+});
 
 test('recognises real Overview links without matching current-page controls', () => {
     const onOverview = 'https://clop.example/game/overview.php';

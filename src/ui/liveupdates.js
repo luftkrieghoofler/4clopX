@@ -668,6 +668,11 @@ export const liveUpdatesModule = {
                 }
                 updateTitle();
                 jset(K.badges, { at: Date.now(), values });
+                // The complete probe can refresh an open Overview in this
+                // same tab without another request.  Other tabs receive only
+                // the cycle signal below and fetch their own non-persisted
+                // copy, keeping form tokens out of shared storage.
+                core.events.emit('overview:document', { document: doc });
                 let resourceStats = null;
                 try {
                     const previousStats = readCachedResourceStats();
@@ -703,7 +708,7 @@ export const liveUpdatesModule = {
                 // Cycle done — marketplace tabs (this one directly, others
                 // via the K.polled storage event) refresh their open market.
                 jset(K.polled, Date.now());
-                core.events.emit('live:polled', {});
+                core.events.emit('live:polled', { remote: false });
             } catch (e) {
                 console.warn('[4clopX] live update failed:', e);
             } finally {
@@ -947,6 +952,7 @@ export const liveUpdatesModule = {
         updateOverviewBadges();
         updateMenuBadges();
         core.events.on('overview:resourceStats', updateOverviewBadges);
+        core.events.on('overview:contentReplaced', updateOverviewBadges);
         core.events.on('market:friendlyCache', updateMenuBadges);
         core.events.on('live:pollNow', requestPollNow);
         // Whichever tab is currently the polling leader adopts interval
@@ -1019,7 +1025,7 @@ export const liveUpdatesModule = {
                 }
             } else if (ev.key === K.polled) {
                 // Another tab finished a poll cycle.
-                core.events.emit('live:polled', {});
+                core.events.emit('live:polled', { remote: true });
             } else if (ev.key === K.friendly) {
                 // Badge data lives in the cache itself; consumers just
                 // recompute from it.
