@@ -14,8 +14,8 @@ function alert(textContent, itemSelector, items = []) {
     };
 }
 
-test('dynamic feedback uses the short two-second toast duration', () => {
-    assert.equal(DEFAULT_TOAST_DURATION, 2000);
+test('dynamic feedback uses a short three-second toast duration', () => {
+    assert.equal(DEFAULT_TOAST_DURATION, 3000);
 });
 
 test('extracts and normalizes stock response errors and information', () => {

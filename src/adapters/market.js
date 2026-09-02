@@ -15,7 +15,7 @@
 //     resources:  [{ id, name, have, selected }],
 //     orders:     [{ resourceId, counterpartyId, price, amount, own,
 //                    ownerHtml, relation }],
-//     messages:   { errors: [html], infos: [html] },
+//     messages:   { errors: [text], infos: [text] },
 //   }
 //
 // `relation` is 'friend' | 'enemy' | 'alliance' | null, read from the
@@ -123,10 +123,10 @@ function parseMultipliers(doc) {
 
 // The static economic-type alert has no div.info children, which is how it
 // is told apart from real info messages rendered by header.php.
-function parseMessages(doc) {
+export function marketMessagesFromDocument(doc) {
     const errors = [], infos = [];
-    for (const d of doc.querySelectorAll('#content .alert-danger div.error')) errors.push(d.innerHTML.trim());
-    for (const d of doc.querySelectorAll('#content .alert-info div.info')) infos.push(d.innerHTML.trim());
+    for (const d of doc.querySelectorAll('#content .alert-danger div.error')) errors.push(d.textContent.trim());
+    for (const d of doc.querySelectorAll('#content .alert-info div.info')) infos.push(d.textContent.trim());
     return { errors, infos };
 }
 
@@ -176,6 +176,10 @@ export function marketIsEmpty(doc) {
 // Hide the server-rendered widgets the dynamic UI replaces (economic-type
 // alert, funds well, the <select> form, orders table / empty warning).
 export function hideStockMarketUi(content) {
+    // Dynamic response feedback is surfaced globally as a modal/toast.
+    for (const alert of content.querySelectorAll(':scope > .alert-danger, :scope > .alert-info')) {
+        if (alert.querySelector('div.error, div.info')) alert.remove();
+    }
     for (const alert of content.querySelectorAll(':scope .alert-info')) {
         if (alert.textContent.includes('economic type') && !alert.querySelector('div.info')) alert.style.display = 'none';
     }
@@ -194,9 +198,7 @@ export function hideStockMarketUi(content) {
     }
 }
 
-// Where to mount a replacement UI: before the first stock widget, i.e. after
-// the header-rendered alerts (errors/infos from a classic POST navigation
-// stay visible above it).
+// Where to mount a replacement UI: before the first stock widget.
 export function stockUiInsertionPoint(content) {
     return content.querySelector(':scope > center, :scope > form, :scope > table') || null;
 }
@@ -265,12 +267,12 @@ export function createMarketAdapter(core, kind, mode, seedDoc = null) {
             [tokenField]: token, mode, resource_id: resourceId, ...params,
         });
         let doc = absorbToken(await send());
-        let messages = parseMessages(doc);
+        let messages = marketMessagesFromDocument(doc);
         if (messages.errors.some(isTryAgain)) {
             // Stale token (e.g. another browser tab consumed it); the failed
             // response already delivered the fresh one via absorbToken.
             doc = absorbToken(await send());
-            messages = parseMessages(doc);
+            messages = marketMessagesFromDocument(doc);
             messages.errors = messages.errors.filter((e) => !isTryAgain(e));
         }
         return snapshot(doc, messages, resourceId);
@@ -289,7 +291,7 @@ export function createMarketAdapter(core, kind, mode, seedDoc = null) {
 
         // Initial state from an already-rendered page — no network.
         snapshotFromDocument(doc) {
-            const snap = snapshot(doc, { errors: [], infos: [] });
+            const snap = snapshot(doc, marketMessagesFromDocument(doc));
             const selected = snap.resources.find((r) => r.selected);
             snap.resourceId = selected ? selected.id : null;
             return snap;

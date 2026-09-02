@@ -156,7 +156,6 @@ export const marketplaceModule = {
             mult: { buy: 1, sell: 1 },
             resources: [],
             orders: [],
-            messages: { errors: [], infos: [] },
             updatedAt: null,
             busy: false,
             showDna: core.storage.get(SHOW_DNA_KEY, '0') === '1',
@@ -208,7 +207,10 @@ export const marketplaceModule = {
             if (remembered && state.resources.some((r) => r.id === remembered)) state.activeId = remembered;
         }
         if (linkedId && !linked) {
-            state.messages.infos.push(`The saved market resource ${linkedId} is no longer available; showing the normal market instead.`);
+            showMarketMessages({
+                errors: [],
+                infos: [`The saved market resource ${linkedId} is no longer available; showing the normal market instead.`],
+            }, { successTitle: 'Saved market unavailable', kind: 'info' });
         }
         try {
             history.replaceState(null, '', marketViewUrl(state.side, mode, state.activeId));
@@ -238,6 +240,23 @@ export const marketplaceModule = {
         // stand out against the auxiliary price info around them.
         const bold = (text) => el('strong', {}, [text]);
 
+        function showMarketMessages(messages, options = {}) {
+            const hasErrors = !!(messages && messages.errors && messages.errors.length);
+            const hasInfos = !!(messages && messages.infos && messages.infos.length);
+            if (!hasErrors && !hasInfos) return false;
+            core.feedback.fromMessages(messages, {
+                errorTitle: 'Marketplace action failed',
+                successTitle: 'Marketplace updated',
+                ...options,
+            });
+            return true;
+        }
+
+        function showMarketError(error, title = 'Marketplace action failed') {
+            const message = error instanceof Error ? error.message : error;
+            core.feedback.error(String(message || 'Unknown marketplace error.'), { title });
+        }
+
         // A sweep in THIS tab ships full snapshots: adopt the open market's
         // in place of a reload of our own (the cycle-end live:polled
         // fallback then stands down).  Badge data lives in the shared cache
@@ -247,8 +266,8 @@ export const marketplaceModule = {
             if (d.mode !== mode || state.busy) return;
             if (d.snap && d.side === state.side && d.resourceId === state.activeId && !ordersInputPending()) {
                 adoptedThisCycle = true;
-                if (merge(d.snap, { auto: true })) render();
-                else refreshOrdersView();
+                merge(d.snap);
+                refreshOrdersView();
             }
         });
         core.events.on('market:friendlyCache', () => {
@@ -333,18 +352,14 @@ export const marketplaceModule = {
             recordFriendly(initialFriendly.side, initialFriendly.resourceId, initialFriendly.orders);
         }
 
-        // opts.auto marks a background refresh: the message area is kept
-        // unless the response actually carries messages.  Returns whether
-        // messages were replaced (the caller then needs a full render).
-        function merge(snap, opts) {
-            const auto = !!(opts && opts.auto);
+        // Adopt a complete server snapshot.  Any operation feedback is
+        // surfaced globally, independent of the marketplace's render tree.
+        function merge(snap) {
             state.orders = snap.orders;
             if (snap.funds) state.funds = snap.funds;
             if (snap.mult) state.mult = snap.mult;
             if (snap.resources.length) state.resources = snap.resources;
-            const hasMessages = snap.messages.errors.length > 0 || snap.messages.infos.length > 0;
-            const replaceMessages = !auto || hasMessages;
-            if (replaceMessages) state.messages = snap.messages;
+            showMarketMessages(snap.messages);
             if (snap.resourceId) {
                 state.activeId = snap.resourceId;
                 recordFriendly(snap.kind, snap.resourceId, snap.orders);
@@ -360,7 +375,6 @@ export const marketplaceModule = {
                 mode, side: snap.kind, resourceId: state.activeId,
                 resourceName: resourceName(state.activeId), at: Date.now(),
             });
-            return replaceMessages;
         }
 
         async function run(action, opts) {
@@ -369,9 +383,9 @@ export const marketplaceModule = {
             setBusy(true);
             let fullRender = !auto;
             try {
-                if (merge(await action(), opts)) fullRender = true;
+                merge(await action());
             } catch (e) {
-                state.messages = { errors: [String(e.message || e)], infos: [] };
+                showMarketError(e);
                 fullRender = true;
             } finally {
                 setBusy(false);
@@ -512,7 +526,7 @@ export const marketplaceModule = {
                     }
                     merge(await action());
                 } catch (e) {
-                    state.messages = { errors: [String(e.message || e)], infos: [] };
+                    showMarketError(e);
                 } finally {
                     setBusy(false);
                     if (cancelled) updateMaxUi();
@@ -531,31 +545,28 @@ export const marketplaceModule = {
             const fresh = stats.byName[name.toLowerCase()];
             const freshReserve = fresh ? protectedReserve(fresh) : null;
             if (!fresh || freshReserve !== expected.reserve) {
-                state.messages = {
-                    errors: [`${wording.notDone}: the upkeep of ${name} changed — used to be ${core.commas(expected.reserve)}, ` +
+                showMarketError(
+                    `${wording.notDone}: the upkeep of ${name} changed — used to be ${core.commas(expected.reserve)}, ` +
                         `now it's ${fresh ? `${core.commas(freshReserve)} (${reserveText(fresh)})` : 'unknown'}. ` +
-                        'Check the numbers and try again if you\'re happy.'],
-                    infos: [],
-                };
+                        'Check the numbers and try again if you\'re happy.',
+                    'Sale not completed');
                 return 'changed';
             }
             const freshSpare = reserveSafeMax(fresh.qty, freshReserve);
             if (freshSpare === null) {
-                state.messages = {
-                    errors: [`${wording.notDone}: the stock or upkeep of ${name} could not be read. ` +
-                        'Check the numbers and try again if you\'re happy.'],
-                    infos: [],
-                };
+                showMarketError(
+                    `${wording.notDone}: the stock or upkeep of ${name} could not be read. ` +
+                        'Check the numbers and try again if you\'re happy.',
+                    'Sale not completed');
                 return 'changed';
             }
             const freshMax = expected.cap == null ? freshSpare : Math.min(freshSpare, expected.cap);
             if (freshMax !== expected.n) {
-                state.messages = {
-                    errors: [`${wording.notDone}: your ${name} stock changed — ${wording.maxLabel} would now ${wording.verb} ` +
+                showMarketError(
+                    `${wording.notDone}: your ${name} stock changed — ${wording.maxLabel} would now ${wording.verb} ` +
                         `${core.commas(freshMax)} instead of ${core.commas(expected.n)}. ` +
-                        'Check the numbers and try again if you\'re happy.'],
-                    infos: [],
-                };
+                        'Check the numbers and try again if you\'re happy.',
+                    'Sale not completed');
                 return 'changed';
             }
             if (!(await confirmSaleRisks(fresh, name, expected.n, wording.confirmVerb, {
@@ -576,7 +587,7 @@ export const marketplaceModule = {
                 if (verified !== 'ok') return;
                 merge(await adapter().takeOrder(order, String(expected.n)));
             } catch (e) {
-                state.messages = { errors: [String(e.message || e)], infos: [] };
+                showMarketError(e);
             } finally {
                 setBusy(false);
                 render();
@@ -592,7 +603,6 @@ export const marketplaceModule = {
             if (remembered && state.resources.some((r) => r.id === remembered)) state.activeId = remembered;
             state.orders = [];
             state.updatedAt = null;
-            state.messages = { errors: [], infos: [] };
             // Keep the URL aligned with the stock page for this side.
             try { history.replaceState(null, '', marketViewUrl(side, mode, state.activeId)); } catch (e) { /* ignore */ }
             render();
@@ -640,8 +650,7 @@ export const marketplaceModule = {
         const content = document.getElementById('content');
         const root = el('div', { id: 'clop-market-root' });
         // Persistent container for the orders table, so background
-        // refreshes can rebuild it without touching the place form or the
-        // message area.
+        // refreshes can rebuild it without touching the place form.
         const ordersBox = el('div', { class: 'clop-orders' });
 
         function multiplierNote() {
@@ -682,26 +691,13 @@ export const marketplaceModule = {
                     type: 'button',
                     onclick: () => {
                         // Partial refresh: reload orders and run a poll, but
-                        // leave the place form and message area untouched.
+                        // leave the place form untouched.
                         if (!state.activeId) { core.events.emit('live:pollNow', {}); return; }
                         run(() => adapter().load(state.activeId), { auto: true })
                             .then(() => core.events.emit('live:pollNow', {}));
                     },
                 }, ['⟳ Refresh']),
             ]));
-
-            /* messages from the last response */
-            for (const [cls, list] of [['danger', state.messages.errors], ['info', state.messages.infos]]) {
-                for (const html of list) {
-                    const alert = el('div', { class: `alert alert-${cls} alert-dismissible` });
-                    alert.appendChild(el('button', {
-                        class: 'close', type: 'button', html: '&times;',
-                        onclick: () => alert.remove(),
-                    }));
-                    alert.appendChild(el('span', { html }));
-                    root.appendChild(alert);
-                }
-            }
 
             /* resource tabs — the active tab and favourites (DNA included) are
              * always visible; the favourites-only / DNA filters only govern
@@ -807,8 +803,7 @@ export const marketplaceModule = {
         });
 
         // Background refresh: rebuild the orders table and patch the funds
-        // and "updated" stamps in place — the place form and message area
-        // stay untouched.
+        // and "updated" stamps in place — the place form stays untouched.
         function refreshOrdersView() {
             renderOrdersInto();
             const funds = root.querySelector('.clop-funds');
@@ -1079,22 +1074,25 @@ export const marketplaceModule = {
                     const amountValue = qty.value.trim();
                     const enteredPrice = price.value.trim() || (sell ? '' : DEFAULT_BUY_ORDER_PRICE);
                     if (!/^\d+$/.test(amountValue) || !/^\d+$/.test(enteredPrice)) {
-                        state.messages = { errors: ['Digits only- no commas, periods, or other markers.'], infos: [] };
-                        render();
+                        showMarketError(
+                            'Digits only- no commas, periods, or other markers.',
+                            'Invalid marketplace order');
                         return;
                     }
                     let priceValue = enteredPrice;
                     if (sell && pricingMode === 'total') {
                         const calculatedPrice = unitPriceForTotal(Number(amountValue), Number(enteredPrice));
                         if (!calculatedPrice) {
-                            state.messages = { errors: ['Quantity and desired total must be positive whole numbers within the supported range.'], infos: [] };
-                            render();
+                            showMarketError(
+                                'Quantity and desired total must be positive whole numbers within the supported range.',
+                                'Invalid marketplace order');
                             return;
                         }
                         priceValue = String(calculatedPrice);
                     } else if (!(Number(enteredPrice) > 0)) {
-                        state.messages = { errors: ['Quantity and price must both be greater than zero.'], infos: [] };
-                        render();
+                        showMarketError(
+                            'Quantity and price must both be greater than zero.',
+                            'Invalid marketplace order');
                         return;
                     }
                     if (sell) {
@@ -1382,6 +1380,7 @@ export const marketplaceModule = {
 
         hideStockMarketUi(content);
         content.insertBefore(root, stockUiInsertionPoint(content));
+        showMarketMessages(boot.messages);
 
         // Resource pills and shortcuts are real fragment links.  A change on
         // this already-open marketplace tab is fulfilled dynamically through
@@ -1391,11 +1390,9 @@ export const marketplaceModule = {
             const resourceId = marketResourceFromLocation(location);
             if (!resourceId || resourceId === state.activeId) return;
             if (!state.resources.some((resource) => resource.id === resourceId)) {
-                state.messages = {
-                    errors: [`Market resource ${resourceId} is no longer available.`],
-                    infos: [],
-                };
-                render();
+                showMarketError(
+                    `Market resource ${resourceId} is no longer available.`,
+                    'Market unavailable');
                 return;
             }
             if (state.busy) {

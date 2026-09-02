@@ -6,7 +6,7 @@ import {
     saleResourceRisks, sellRevenueAfterTax, unitPriceForSellRevenue,
 } from '../src/ui/marketplace.js';
 import {
-    marketResourceFromLocation, marketResourcesFromDocument,
+    marketMessagesFromDocument, marketResourceFromLocation, marketResourcesFromDocument,
     marketViewUrl, summarizeFriendly,
 } from '../src/adapters/market.js';
 import {
@@ -32,6 +32,23 @@ test('offers contrasting-accent and stock-theme market badge styles', () => {
     ]);
     assert.equal(badgeSetting.options[0].example.class, 'clop-choice-example-accent');
     assert.equal(badgeSetting.options[1].example.stock, true);
+});
+
+test('extracts marketplace server feedback as clean text', () => {
+    const error = { textContent: '  Too   many\norders.  ' };
+    const info = { textContent: ' Order placed. ' };
+    const doc = {
+        querySelectorAll(selector) {
+            if (selector === '#content .alert-danger div.error') return [error];
+            if (selector === '#content .alert-info div.info') return [info];
+            return [];
+        },
+    };
+
+    assert.deepEqual(marketMessagesFromDocument(doc), {
+        errors: ['Too   many\norders.'],
+        infos: ['Order placed.'],
+    });
 });
 
 test('calculates the lowest unit price that meets an after-tax revenue target', () => {

@@ -2,7 +2,7 @@
 // errors and informational results at the top of #content; dynamic controls
 // instead need feedback that remains visible at any scroll position.
 
-export const DEFAULT_TOAST_DURATION = 2000;
+export const DEFAULT_TOAST_DURATION = 3000;
 
 function text(value) {
     return String(value || '').replace(/\s+/g, ' ').trim();
@@ -167,8 +167,11 @@ export const feedbackModule = {
             });
         }
 
-        function fromDocument(sourceDoc, options = {}) {
-            const messages = feedbackMessagesFromDocument(sourceDoc);
+        function fromMessages(sourceMessages, options = {}) {
+            const messages = {
+                errors: normalizedMessages(sourceMessages && sourceMessages.errors || []),
+                infos: normalizedMessages(sourceMessages && sourceMessages.infos || []),
+            };
             const errors = [
                 ...messages.errors,
                 ...normalizedMessages(options.additionalErrors || []),
@@ -204,11 +207,16 @@ export const feedbackModule = {
             return Promise.resolve(messages);
         }
 
+        function fromDocument(sourceDoc, options = {}) {
+            return fromMessages(feedbackMessagesFromDocument(sourceDoc), options);
+        }
+
         core.feedback = {
             toast,
             success: (messages, options) => toast(messages, { ...options, kind: 'success' }),
             info: (messages, options) => toast(messages, { ...options, kind: 'info' }),
             error,
+            fromMessages,
             fromDocument,
             messagesFromDocument: feedbackMessagesFromDocument,
         };
