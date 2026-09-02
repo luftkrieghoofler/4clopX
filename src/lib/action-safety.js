@@ -1,4 +1,11 @@
 import { upkeepRiskForChange } from './upkeep-safety.js';
+import {
+    NATION_COLLAPSE_THRESHOLD, REBEL_SATISFACTION_THRESHOLDS,
+} from './satisfaction-safety.js';
+
+export {
+    NATION_COLLAPSE_THRESHOLD, REBEL_SATISFACTION_THRESHOLDS,
+} from './satisfaction-safety.js';
 
 export function normalizeActionText(text) {
     return String(text || '').replace(/\s+/g, ' ').trim();
@@ -24,22 +31,6 @@ function add(map, key, amount) {
 function keyed(stats, collection, name) {
     return stats && stats[collection] ? stats[collection][name.toLowerCase()] || null : null;
 }
-
-export const NATION_COLLAPSE_THRESHOLD = -5000;
-
-export const REBEL_SATISFACTION_THRESHOLDS = Object.freeze({
-    'Loose Despotism': -100,
-    'Solar Vassal': -100,
-    'Lunar Client': -100,
-    Democracy: 0,
-    Repression: -300,
-    Independence: 0,
-    Decentralization: 0,
-    Oppression: -500,
-    Authoritarianism: -400,
-    'Alicorn Elite': -500,
-    Transponyism: -500,
-});
 
 function effectNeedsProjection(effect) {
     return !!effect && (

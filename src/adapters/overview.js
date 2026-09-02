@@ -24,6 +24,10 @@
 //   at: Date,
 // }.
 
+import {
+    REBEL_SATISFACTION_THRESHOLDS, satisfactionTicksWorth,
+} from '../lib/satisfaction-safety.js';
+
 export const RESOURCE_STATS_CACHE_KEY = 'clopx.live.overview';
 
 function cellNumber(text) {
@@ -59,6 +63,21 @@ export function nationStatusFromDocument(doc) {
 
 export function nationSatisfactionFromDocument(doc) {
     return nationStatusFromDocument(doc).satisfaction;
+}
+
+export function overviewSatisfactionRow(doc) {
+    for (const panel of doc.querySelectorAll('.panel')) {
+        const heading = panel.querySelector('.panel-heading');
+        if (!heading || heading.textContent.trim() !== 'Nation') continue;
+        for (const row of panel.querySelectorAll('tbody tr')) {
+            const cells = row.querySelectorAll('td');
+            if (cells.length >= 2 && cells[0].textContent.trim() === 'Satisfaction') {
+                return { row, labelCell: cells[0], valueCell: cells[1] };
+            }
+        }
+        return null;
+    }
+    return null;
 }
 
 function resourceTableInfo(doc) {
@@ -191,7 +210,18 @@ function snapshotResourceStats(stats, at = Date.now()) {
             net: Number(resource.net) || 0,
         };
     }
-    return { at: Number(at) || Date.now(), byName };
+    const statusNumber = (value) => {
+        if (value === null || value === undefined || value === '') return null;
+        const number = Number(value);
+        return Number.isFinite(number) ? number : null;
+    };
+    return {
+        at: Number(at) || Date.now(),
+        byName,
+        satisfaction: statusNumber(stats && stats.satisfaction),
+        satisfactionPerTick: statusNumber(stats && stats.satisfactionPerTick),
+        government: stats && stats.government ? String(stats.government) : null,
+    };
 }
 
 export function readCachedResourceStats() {
@@ -204,9 +234,9 @@ export function readCachedResourceStats() {
     }
 }
 
-// Publish only the resource portion needed by global badges. Safety checks
-// still use their freshly parsed full result (including buildings and nation
-// status), while every such fetch updates this cross-tab cache for free.
+// Publish the resource and satisfaction values needed by global badges.
+// Safety checks still use their freshly parsed full result (including
+// buildings), while every such fetch updates this cross-tab cache for free.
 export function publishResourceStats(core, stats, at = Date.now()) {
     const snapshot = snapshotResourceStats(stats, at);
     try { localStorage.setItem(RESOURCE_STATS_CACHE_KEY, JSON.stringify(snapshot)); } catch (e) { /* ignore */ }
@@ -247,12 +277,31 @@ export function resourceBufferSummary(stats, warningTicks = 5, criticalTicks = 1
     const compare = (a, b) => a.ticks - b.ticks || a.name.localeCompare(b.name);
     warning.sort(compare);
     critical.sort(compare);
+    const satisfactionTicks = satisfactionTicksWorth(stats);
+    let satisfaction = null;
+    if (satisfactionTicks !== null
+        && (satisfactionTicks <= warningThreshold || satisfactionTicks <= criticalThreshold)) {
+        satisfaction = {
+            name: 'Satisfaction',
+            ticks: satisfactionTicks,
+            severity: satisfactionTicks <= criticalThreshold ? 'critical' : 'warning',
+            value: Number(stats.satisfaction),
+            perTick: Number(stats.satisfactionPerTick),
+            rebelThreshold: REBEL_SATISFACTION_THRESHOLDS[stats.government],
+        };
+    }
+    const warningCount = warning.length + Number(satisfaction && satisfaction.severity === 'warning');
+    const criticalCount = critical.length + Number(satisfaction && satisfaction.severity === 'critical');
     return {
         warningThreshold,
         criticalThreshold,
         warning,
         critical,
         affected: [...critical, ...warning],
+        satisfaction,
+        warningCount,
+        criticalCount,
+        affectedCount: warningCount + criticalCount,
     };
 }
 
@@ -262,6 +311,27 @@ export function newlyCriticalResources(previous, current, warningTicks = 5, crit
         previous, warningTicks, criticalTicks).critical.map((item) => item.name.toLowerCase()));
     return resourceBufferSummary(current, warningTicks, criticalTicks).critical
         .filter((item) => !before.has(item.name.toLowerCase()));
+}
+
+export function newlyCriticalOverviewBuffers(
+    previous, current, warningTicks = 5, criticalTicks = 1,
+) {
+    if (!previous) return { resources: [], satisfaction: null };
+    const resources = newlyCriticalResources(
+        previous, current, warningTicks, criticalTicks);
+    const before = resourceBufferSummary(previous, warningTicks, criticalTicks);
+    const after = resourceBufferSummary(current, warningTicks, criticalTicks);
+    const previousSatisfactionKnown = previous.satisfaction !== null
+        && previous.satisfaction !== undefined
+        && previous.satisfactionPerTick !== null
+        && previous.satisfactionPerTick !== undefined
+        && Number.isFinite(REBEL_SATISFACTION_THRESHOLDS[previous.government]);
+    const satisfaction = previousSatisfactionKnown
+        && after.satisfaction && after.satisfaction.severity === 'critical'
+        && (!before.satisfaction || before.satisfaction.severity !== 'critical')
+        ? after.satisfaction
+        : null;
+    return { resources, satisfaction };
 }
 
 export async function fetchResourceStats(core) {

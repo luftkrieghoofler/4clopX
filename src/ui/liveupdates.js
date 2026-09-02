@@ -4,7 +4,7 @@
 //     renders with all counts, and
 //   * alliance/friend orders in WATCHED favourite markets (either side,
 //     any mode; see marketNotifyEnabled), via the market sweep, and
-//   * low resource buffers from the Overview page.
+//   * low resource and satisfaction buffers from the Overview page.
 //
 // CROSS-TAB DESIGN: exactly one tab — the elected leader — polls; all
 // state is shared through localStorage and `storage` events:
@@ -13,7 +13,7 @@
 //   clopx.live.pollNow   number           "poll immediately" signal
 //   clopx.live.seen      number           last time any tab was visible
 //   clopx.live.badges    {at, values}     last header badge values
-//   clopx.live.overview  {at, byName}     last Overview resource values
+//   clopx.live.overview  {at, ...}        last Overview safety values
 //   clopx.live.polled    number           a poll cycle finished (signal)
 //   clopx.live.friendly  {key: {...}}     the friendly-order cache, keyed
 //                                          "mode|side|resourceId" (mode ''
@@ -40,9 +40,9 @@ import { headerBadges, applyHeaderBadges, HEADER_PROBE_PAGE } from '../adapters/
 import { isLoggedInDoc, login, CRED_KEY } from '../adapters/session.js';
 import { protectedReserve } from '../lib/upkeep-safety.js';
 import {
-    fetchResourceStats, newlyCriticalResources, overviewResourceRows,
-    parseResourceStats, publishResourceStats, readCachedResourceStats,
-    RESOURCE_STATS_CACHE_KEY, resourceBufferSummary,
+    fetchResourceStats, newlyCriticalOverviewBuffers, overviewResourceRows,
+    overviewSatisfactionRow, parseResourceStats, publishResourceStats,
+    readCachedResourceStats, RESOURCE_STATS_CACHE_KEY, resourceBufferSummary,
 } from '../adapters/overview.js';
 import { readFavourites } from '../lib/favourites.js';
 
@@ -190,8 +190,12 @@ export function overviewMenuAnchors(doc, baseHref) {
 }
 
 export function resourceBufferTitleMarker(summary) {
-    if (summary && summary.critical && summary.critical.length) return '!!';
-    if (summary && summary.warning && summary.warning.length) return '!';
+    if (summary && (summary.criticalCount
+        || (summary.critical && summary.critical.length)
+        || (summary.satisfaction && summary.satisfaction.severity === 'critical'))) return '!!';
+    if (summary && (summary.warningCount
+        || (summary.warning && summary.warning.length)
+        || (summary.satisfaction && summary.satisfaction.severity === 'warning'))) return '!';
     return '';
 }
 
@@ -263,7 +267,7 @@ export const liveUpdatesModule = {
             key: 'live.enabled',
             section: 'Live updates',
             label: 'Live updates (messages, alliance, markets, resources)',
-            description: 'Periodically check for new messages, alliance messages, alliance orders in favourite markets, and low resource buffers, updating the header badges in place.',
+            description: 'Periodically check for new messages, alliance messages, alliance orders in favourite markets, and low resource or satisfaction buffers, updating the header badges in place.',
             type: 'bool',
             default: true,
             reload: true,
@@ -290,7 +294,7 @@ export const liveUpdatesModule = {
             key: 'live.notify',
             section: 'Live updates',
             label: 'Desktop notifications while no tab is focused',
-            description: 'Notify about new messages, alliance messages, deals, incoming attacks, actionable alliance orders in favourite markets, and resources newly reaching a critical buffer.',
+            description: 'Notify about new messages, alliance messages, deals, incoming attacks, actionable alliance orders in favourite markets, and Overview values newly reaching a critical buffer.',
             type: 'bool',
             default: true,
             // The settings-UI click is a user gesture, which is exactly
@@ -307,7 +311,7 @@ export const liveUpdatesModule = {
             key: 'overview.bufferWarningTicks',
             section: 'Overview',
             label: 'Number of ticks until warning',
-            description: 'Show a yellow warning when a resource with negative net production has this many usable ticks remaining or fewer.',
+            description: 'Show a yellow warning when a draining resource has this many usable ticks remaining, or satisfaction has this many safe ticks before the rebel limit.',
             type: 'number',
             default: 5,
             min: 0,
@@ -318,7 +322,7 @@ export const liveUpdatesModule = {
             key: 'overview.bufferCriticalTicks',
             section: 'Overview',
             label: 'Number of ticks until critical',
-            description: 'Show a red critical warning, and allow desktop notification, when a resource has this many usable ticks remaining or fewer.',
+            description: 'Show a red critical warning, and allow desktop notification, when a resource or satisfaction reaches this threshold.',
             type: 'number',
             default: 1,
             min: 0,
@@ -403,6 +407,8 @@ export const liveUpdatesModule = {
             .clop-resource-buffer-warning { background-color: #f0ad4e !important; }
             .clop-resource-buffer-critical { background-color: #d9534f !important; }
             .clop-resource-row-badge { margin-left: 4px; vertical-align: middle; }
+            .clop-satisfaction-row-badge { margin-left: 4px; vertical-align: middle; }
+            td.clop-satisfaction-badge-cell { white-space: nowrap; }
             td.clop-resource-badge-cell { width: auto !important; white-space: nowrap; }
             td.clop-resource-badge-cell > img,
             td.clop-resource-badge-cell > .clop-resource-row-badge { display: inline-block; vertical-align: middle; }
@@ -433,16 +439,21 @@ export const liveUpdatesModule = {
                     `${summary.warning.length === 1 ? '' : 's'} (≤${summary.warningThreshold} tick` +
                     `${summary.warningThreshold === 1 ? '' : 's'})`);
             }
+            if (summary.satisfaction) {
+                parts.push(`${summary.satisfaction.severity} satisfaction buffer ` +
+                    `(${summary.satisfaction.ticks} safe tick` +
+                    `${summary.satisfaction.ticks === 1 ? '' : 's'} to the rebel limit)`);
+            }
             return parts.join('; ');
         }
 
         function updateOverviewBadges() {
             const stats = readCachedResourceStats();
             const summary = bufferSummary(stats);
-            const severity = summary.critical.length ? 'critical' : 'warning';
+            const severity = summary.criticalCount ? 'critical' : 'warning';
             for (const anchor of overviewAnchors()) {
                 let badge = anchor.querySelector(':scope > .clop-resource-buffer-badge');
-                if (!summary.affected.length) {
+                if (!summary.affectedCount) {
                     if (badge) badge.remove();
                     continue;
                 }
@@ -452,7 +463,7 @@ export const liveUpdatesModule = {
                 }
                 badge.classList.toggle('clop-resource-buffer-warning', severity === 'warning');
                 badge.classList.toggle('clop-resource-buffer-critical', severity === 'critical');
-                badge.textContent = String(summary.affected.length);
+                badge.textContent = String(summary.affectedCount);
                 badge.title = overviewBadgeTitle(summary);
             }
 
@@ -474,6 +485,28 @@ export const liveUpdatesModule = {
                 const host = row.iconCell || row.nameCell;
                 host.classList.add('clop-resource-badge-cell');
                 host.appendChild(badge);
+            }
+
+            const oldSatisfactionBadge = document.querySelector('.clop-satisfaction-row-badge');
+            if (oldSatisfactionBadge) {
+                oldSatisfactionBadge.parentElement?.classList.remove('clop-satisfaction-badge-cell');
+                oldSatisfactionBadge.remove();
+            }
+            if (summary.satisfaction) {
+                const satisfactionRow = overviewSatisfactionRow(document);
+                if (satisfactionRow) {
+                    const item = summary.satisfaction;
+                    const critical = item.severity === 'critical';
+                    satisfactionRow.labelCell.classList.add('clop-satisfaction-badge-cell');
+                    satisfactionRow.labelCell.appendChild(el('span', {
+                        class: 'badge clop-resource-buffer-badge clop-satisfaction-row-badge ' +
+                            (critical ? 'clop-resource-buffer-critical' : 'clop-resource-buffer-warning'),
+                        title: `Satisfaction has ${item.ticks} safe tick${item.ticks === 1 ? '' : 's'} ` +
+                            `before crossing the ${core.commas(item.rebelThreshold)} rebel limit ` +
+                            `(currently ${core.commas(item.value)}, ${item.perTick >= 0 ? '+' : ''}` +
+                            `${core.commas(item.perTick)}/tick)`,
+                    }, [critical ? '!!' : '!']));
+                }
             }
             updateTitle();
         }
@@ -533,7 +566,7 @@ export const liveUpdatesModule = {
         }
 
         /* ---------------- tab title markers ----------------
-         * "!! [3] (Mkt: 2) Overview - >CLOP…": resource-buffer severity;
+         * "!! [3] (Mkt: 2) Overview - >CLOP…": Overview-buffer severity;
          * [number of DISTINCT pending
          * notification categories — messages, alliance messages, deals,
          * incoming attacks; not polls] — a count of things to go check,
@@ -622,25 +655,31 @@ export const liveUpdatesModule = {
                     const previousStats = readCachedResourceStats();
                     resourceStats = parseResourceStats(doc);
                     publishResourceStats(core, resourceStats);
-                    const newlyCritical = newlyCriticalResources(
+                    const newlyCritical = newlyCriticalOverviewBuffers(
                         previousStats,
                         resourceStats,
                         core.settings.get('overview.bufferWarningTicks'),
                         core.settings.get('overview.bufferCriticalTicks'),
                     );
-                    if (newlyCritical.length) {
-                        const details = newlyCritical
-                            .map((item) => `${item.name}: ${item.ticks} tick${item.ticks === 1 ? '' : 's'}`)
-                            .join('; ');
+                    const criticalCount = newlyCritical.resources.length
+                        + Number(!!newlyCritical.satisfaction);
+                    if (criticalCount) {
+                        const details = newlyCritical.resources
+                            .map((item) => `${item.name}: ${item.ticks} tick${item.ticks === 1 ? '' : 's'}`);
+                        if (newlyCritical.satisfaction) {
+                            const item = newlyCritical.satisfaction;
+                            details.push(`Satisfaction: ${item.ticks} safe tick` +
+                                `${item.ticks === 1 ? '' : 's'} to the rebel limit`);
+                        }
                         notify(
-                            `Critical resource buffer${newlyCritical.length === 1 ? '' : 's'} — ${details}`,
+                            `Critical Overview buffer${criticalCount === 1 ? '' : 's'} — ${details.join('; ')}`,
                             'overview.php',
-                            'resource-buffers');
+                            'overview-buffers');
                     }
                 } catch (e) {
                     // Header and market refreshes remain useful if a host
                     // changes the Overview table markup unexpectedly.
-                    console.warn('[4clopX] Overview resource refresh failed:', e);
+                    console.warn('[4clopX] Overview safety refresh failed:', e);
                 }
                 await sweepFavourites(resourceStats);
                 // Cycle done — marketplace tabs (this one directly, others
