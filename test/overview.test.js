@@ -10,7 +10,7 @@ import { HEADER_PROBE_PAGE } from '../src/adapters/header.js';
 import { satisfactionTicksWorth } from '../src/lib/satisfaction-safety.js';
 import {
     isOverviewDestination, liveUpdatesModule, overviewMenuAnchors,
-    resourceBufferTitleMarker,
+    overviewMenuBadgeCounts, resourceBufferTitleMarker,
 } from '../src/ui/liveupdates.js';
 
 test('recognises real Overview links without matching current-page controls', () => {
@@ -64,6 +64,14 @@ test('uses the highest Overview-buffer severity in the tab title', () => {
     assert.equal(resourceBufferTitleMarker({
         warning: [], critical: [], warningCount: 0, criticalCount: 1,
     }), '!!', 'a satisfaction-only critical state is included');
+});
+
+test('keeps warning and critical menu-badge totals separate', () => {
+    assert.deepEqual(overviewMenuBadgeCounts({
+        warningCount: 3,
+        criticalCount: 1,
+        affectedCount: 4,
+    }), { warning: 3, critical: 1 });
 });
 
 test('counts the usable tick omitted by the stock Ticks-Worth column', () => {

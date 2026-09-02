@@ -199,6 +199,13 @@ export function resourceBufferTitleMarker(summary) {
     return '';
 }
 
+export function overviewMenuBadgeCounts(summary) {
+    return {
+        warning: Math.max(0, Number(summary && summary.warningCount) || 0),
+        critical: Math.max(0, Number(summary && summary.criticalCount) || 0),
+    };
+}
+
 function targetIsActionable(target, snap, stats, previous) {
     if (target.side !== 'buyer' || target.mode) return true;
     const resource = snap.resources.find((r) => r.id === target.resourceId);
@@ -427,20 +434,19 @@ export const liveUpdatesModule = {
             return overviewMenuAnchors(document, location.href);
         }
 
-        function overviewBadgeTitle(summary) {
+        function overviewBadgeTitle(summary, severity) {
             const parts = [];
-            if (summary.critical.length) {
-                parts.push(`${summary.critical.length} critical resource buffer` +
-                    `${summary.critical.length === 1 ? '' : 's'} (≤${summary.criticalThreshold} tick` +
-                    `${summary.criticalThreshold === 1 ? '' : 's'})`);
+            const resources = severity === 'critical' ? summary.critical : summary.warning;
+            const threshold = severity === 'critical'
+                ? summary.criticalThreshold
+                : summary.warningThreshold;
+            if (resources.length) {
+                parts.push(`${resources.length} ${severity === 'critical' ? 'critical' : 'low'} resource buffer` +
+                    `${resources.length === 1 ? '' : 's'} (≤${threshold} tick` +
+                    `${threshold === 1 ? '' : 's'})`);
             }
-            if (summary.warning.length) {
-                parts.push(`${summary.warning.length} low resource buffer` +
-                    `${summary.warning.length === 1 ? '' : 's'} (≤${summary.warningThreshold} tick` +
-                    `${summary.warningThreshold === 1 ? '' : 's'})`);
-            }
-            if (summary.satisfaction) {
-                parts.push(`${summary.satisfaction.severity} satisfaction buffer ` +
+            if (summary.satisfaction && summary.satisfaction.severity === severity) {
+                parts.push(`${severity} satisfaction buffer ` +
                     `(${summary.satisfaction.ticks} safe tick` +
                     `${summary.satisfaction.ticks === 1 ? '' : 's'} to the rebel limit)`);
             }
@@ -450,21 +456,33 @@ export const liveUpdatesModule = {
         function updateOverviewBadges() {
             const stats = readCachedResourceStats();
             const summary = bufferSummary(stats);
-            const severity = summary.criticalCount ? 'critical' : 'warning';
+            const counts = overviewMenuBadgeCounts(summary);
             for (const anchor of overviewAnchors()) {
-                let badge = anchor.querySelector(':scope > .clop-resource-buffer-badge');
-                if (!summary.affectedCount) {
-                    if (badge) badge.remove();
-                    continue;
+                const caret = anchor.querySelector(':scope > b.caret');
+                for (const severity of ['warning', 'critical']) {
+                    let badge = anchor.querySelector(
+                        `:scope > .clop-overview-menu-badge.clop-resource-buffer-${severity}`);
+                    if (!counts[severity]) {
+                        if (badge) badge.remove();
+                        continue;
+                    }
+                    if (!badge) {
+                        badge = el('span', {
+                            class: 'badge clop-menu-badge clop-overview-menu-badge ' +
+                                `clop-resource-buffer-badge clop-resource-buffer-${severity}`,
+                        });
+                        anchor.insertBefore(badge, caret);
+                    }
+                    badge.textContent = String(counts[severity]);
+                    badge.title = overviewBadgeTitle(summary, severity);
                 }
-                if (!badge) {
-                    badge = el('span', { class: 'badge clop-menu-badge clop-resource-buffer-badge' });
-                    anchor.insertBefore(badge, anchor.querySelector(':scope > b.caret'));
+                // Keep the two channels stable and intuitive: warning first,
+                // then the more urgent critical count immediately before the caret.
+                for (const severity of ['warning', 'critical']) {
+                    const badge = anchor.querySelector(
+                        `:scope > .clop-overview-menu-badge.clop-resource-buffer-${severity}`);
+                    if (badge) anchor.insertBefore(badge, caret);
                 }
-                badge.classList.toggle('clop-resource-buffer-warning', severity === 'warning');
-                badge.classList.toggle('clop-resource-buffer-critical', severity === 'critical');
-                badge.textContent = String(summary.affectedCount);
-                badge.title = overviewBadgeTitle(summary);
             }
 
             const affected = new Map(summary.affected.map((item) => [item.name.toLowerCase(), item]));
