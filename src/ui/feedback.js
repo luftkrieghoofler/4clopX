@@ -43,7 +43,7 @@ export const feedbackModule = {
 
     init(core) {
         core.addStyle(`
-            #clop-feedback-toasts { position: fixed; right: 18px; bottom: 18px; z-index: 10040; display: flex; flex-direction: column; align-items: flex-end; width: min(420px, calc(100vw - 36px)); pointer-events: none; }
+            #clop-feedback-toasts { position: fixed; top: 18px; right: 18px; z-index: 10040; display: flex; flex-direction: column; align-items: flex-end; width: min(420px, calc(100vw - 36px)); pointer-events: none; }
             .clop-feedback-toast { position: relative; box-sizing: border-box; width: 100%; margin: 7px 0 0; padding: 11px 32px 12px 13px; overflow: hidden; box-shadow: 0 3px 12px rgba(0,0,0,.35); pointer-events: auto; opacity: 1; transform: translateY(0); transition: opacity .16s ease, transform .16s ease; }
             .clop-feedback-toast:focus { outline: 2px solid currentColor; outline-offset: 2px; }
             .clop-feedback-toast.clop-feedback-toast-leaving { opacity: 0; transform: translateY(7px); }
@@ -53,7 +53,7 @@ export const feedbackModule = {
             .clop-feedback-toast-progress { position: absolute; left: 0; bottom: 0; width: 100%; height: 3px; background: currentColor; opacity: .48; transform: scaleX(1); transform-origin: left center; animation: clop-feedback-toast-progress var(--clop-toast-duration) linear forwards; }
             .clop-feedback-toast.clop-feedback-toast-paused .clop-feedback-toast-progress { animation-play-state: paused; }
             @keyframes clop-feedback-toast-progress { from { transform: scaleX(1); } to { transform: scaleX(0); } }
-            @media (max-width: 600px) { #clop-feedback-toasts { right: 10px; bottom: 10px; width: calc(100vw - 20px); } }
+            @media (max-width: 600px) { #clop-feedback-toasts { top: 10px; right: 10px; width: calc(100vw - 20px); } }
             @media (prefers-reduced-motion: reduce) { .clop-feedback-toast { transition: none; } .clop-feedback-toast-progress { animation-timing-function: steps(20); } }
         `);
 
