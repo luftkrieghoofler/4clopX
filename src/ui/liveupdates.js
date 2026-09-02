@@ -522,7 +522,7 @@ export const liveUpdatesModule = {
                         title: `Satisfaction has ${item.ticks} safe tick${item.ticks === 1 ? '' : 's'} ` +
                             `before crossing the ${core.commas(item.rebelThreshold)} rebel limit ` +
                             `(currently ${core.commas(item.value)}, ${item.perTick >= 0 ? '+' : ''}` +
-                            `${core.commas(item.perTick)}/tick)`,
+                            `${core.commas(item.perTick)}/tick excluding high-satisfaction decay)`,
                     }, [critical ? '!!' : '!']));
                 }
             }

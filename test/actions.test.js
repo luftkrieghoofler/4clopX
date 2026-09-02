@@ -14,9 +14,11 @@ import {
 } from '../src/data/actions.generated.js';
 import {
     actionCompatibility, actionNeedsSafetyCheck, projectActionResourceRates,
-    projectActionRisks, projectActionSatisfaction,
+    projectActionRisks, projectActionSatisfaction, SATISFACTION_SAFETY_MODES,
 } from '../src/lib/action-safety.js';
-import { actionsModule, burnOilOutcome } from '../src/ui/actions.js';
+import {
+    actionsModule, burnOilOutcome, SATISFACTION_SAFETY_MODE_SETTING_KEY,
+} from '../src/ui/actions.js';
 
 test('pairs original action mechanics with their original descriptions', () => {
     assert.equal(Object.keys(ACTION_CATALOG).length, 62);
@@ -384,6 +386,63 @@ test('projects base and nonlinear environmental satisfaction from large builds',
     assert.equal(projection.environmentAfter.environmentalPenalty, 3);
 });
 
+test('evaluates satisfaction trends for either stable or max-at-cap play', () => {
+    const effects = {
+        99: {
+            resourceId: 99, name: 'Test Building', satisfaction: -1,
+            badMin: 0, badDiv: 0, environmentalCleaner: false,
+        },
+    };
+    const action = {
+        satisfaction: 0,
+        items: [],
+        output: { resourceId: 99, name: 'Test Building', isBuilding: true, amount: 1 },
+    };
+    const stats = {
+        satisfaction: 421,
+        satisfactionPerTick: -2,
+        government: 'Loose Despotism',
+        buildingsByName: {},
+    };
+
+    const stable = projectActionSatisfaction(action, 1, stats, effects);
+    assert.equal(stable.currentDecay, 3);
+    assert.equal(stable.perTickWithoutDecayBefore, 1);
+    assert.equal(stable.perTickBefore, 1);
+    assert.equal(stable.perTickAfter, 0);
+    assert.equal(stable.trendRisk, false,
+        'temporary high-satisfaction decay does not manufacture a structural deficit');
+
+    const maximum = projectActionSatisfaction(
+        action, 1, stats, effects, SATISFACTION_SAFETY_MODES.MAXIMUM);
+    assert.equal(maximum.modeledDecay, 30);
+    assert.equal(maximum.perTickBefore, -29);
+    assert.equal(maximum.perTickAfter, -30);
+    assert.equal(maximum.trendRisk, true);
+});
+
+test('always excludes high-satisfaction decay from immediate rebel projections', () => {
+    const atLimit = projectActionSatisfaction(ACTION_CATALOG[4], 221, {
+        satisfaction: 1000,
+        satisfactionPerTick: -25,
+        government: 'Loose Despotism',
+        buildingsByName: {},
+    }, BUILDING_EFFECTS, SATISFACTION_SAFETY_MODES.MAXIMUM);
+
+    assert.equal(atLimit.currentDecay, 30);
+    assert.equal(atLimit.perTickWithoutDecayAfter, 5);
+    assert.equal(atLimit.satisfactionAfter, -105);
+    assert.equal(atLimit.nextTickSatisfaction, -100);
+    assert.equal(atLimit.hazard, null, 'landing exactly at the rebel limit remains safe');
+
+    assert.equal(projectActionSatisfaction(ACTION_CATALOG[4], 222, {
+        satisfaction: 1000,
+        satisfactionPerTick: -25,
+        government: 'Loose Despotism',
+        buildingsByName: {},
+    }, BUILDING_EFFECTS).hazard, 'rebels');
+});
+
 test('projects environmental cleaners against aggregate damage', () => {
     const effects = {
         6: {
@@ -537,6 +596,17 @@ test('enables safe actions on every page where recipes can be performed', () => 
     assert.equal(actionsModule.matches('favoriteactions.php'), true);
     assert.equal(actionsModule.matches('overview.php'), true);
     assert.equal(actionsModule.matches('viewnation.php'), false);
+});
+
+test('defaults satisfaction safety to stable balance with a max-GDP alternative', () => {
+    const definitions = [];
+    actionsModule.settings({ settings: { define: (definition) => definitions.push(definition) } });
+    const setting = definitions.find(({ key }) => key === SATISFACTION_SAFETY_MODE_SETTING_KEY);
+    assert.equal(setting.default, SATISFACTION_SAFETY_MODES.STABLE);
+    assert.deepEqual(setting.options.map(({ value }) => value), [
+        SATISFACTION_SAFETY_MODES.STABLE,
+        SATISFACTION_SAFETY_MODES.MAXIMUM,
+    ]);
 });
 
 test('does not mistake embedded favourite-removal controls for performed actions', () => {

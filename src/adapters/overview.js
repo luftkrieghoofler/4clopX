@@ -19,13 +19,14 @@
 //   byName: { <lowercased name>: {name, qty, generated, used, mil, net} },
 //   buildingsByName: { <lowercased name>: {name, qty, disabled, active} },
 //   satisfaction: number | null,
-//   satisfactionPerTick: number | null,
+//   satisfactionPerTick: number | null, // displayed value, including decay
 //   government: string | null,
 //   at: Date,
 // }.
 
 import {
-    REBEL_SATISFACTION_THRESHOLDS, satisfactionTicksWorth,
+    REBEL_SATISFACTION_THRESHOLDS, satisfactionPerTickWithoutDecay,
+    satisfactionTicksWorth,
 } from '../lib/satisfaction-safety.js';
 
 export const RESOURCE_STATS_CACHE_KEY = 'clopx.live.overview';
@@ -281,12 +282,14 @@ export function resourceBufferSummary(stats, warningTicks = 5, criticalTicks = 1
     let satisfaction = null;
     if (satisfactionTicks !== null
         && (satisfactionTicks <= warningThreshold || satisfactionTicks <= criticalThreshold)) {
+        const perTick = satisfactionPerTickWithoutDecay(stats);
         satisfaction = {
             name: 'Satisfaction',
             ticks: satisfactionTicks,
             severity: satisfactionTicks <= criticalThreshold ? 'critical' : 'warning',
             value: Number(stats.satisfaction),
-            perTick: Number(stats.satisfactionPerTick),
+            perTick,
+            displayedPerTick: Number(stats.satisfactionPerTick),
             rebelThreshold: REBEL_SATISFACTION_THRESHOLDS[stats.government],
         };
     }

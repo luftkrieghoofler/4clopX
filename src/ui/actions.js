@@ -8,13 +8,14 @@ import { fetchResourceStats } from '../adapters/overview.js';
 import { ACTION_CATALOG, BUILDING_EFFECTS, BUILDING_UPKEEP } from '../data/actions.generated.js';
 import {
     actionCompatibility, actionNeedsSafetyCheck, projectActionResourceRates,
-    projectActionRisks, projectActionSatisfaction,
+    projectActionRisks, projectActionSatisfaction, SATISFACTION_SAFETY_MODES,
 } from '../lib/action-safety.js';
 import { protectedReserve, reserveSafeMax } from '../lib/upkeep-safety.js';
 import { upkeepWarningContent } from './upkeep-warning.js';
 
 const SETTING_KEY = 'actions.confirmUpkeepRisk';
 const SATISFACTION_TREND_SETTING_KEY = 'actions.confirmNegativeSatisfactionRate';
+export const SATISFACTION_SAFETY_MODE_SETTING_KEY = 'actions.satisfactionSafetyMode';
 const RESOURCE_TREND_SETTING_KEY = 'actions.confirmNegativeResourceRates';
 const AUTHOR_URL = 'viewuser.php?user_id=64';
 const IMMINENT_TICK_SECONDS = 10 * 60;
@@ -62,6 +63,19 @@ export const actionsModule = {
             type: 'bool',
             default: true,
             parent: SETTING_KEY,
+            section: 'Actions',
+        });
+        core.settings.define({
+            key: SATISFACTION_SAFETY_MODE_SETTING_KEY,
+            label: 'Satisfaction safety strategy',
+            description: 'Stable balance ignores the temporary decay from already-high satisfaction. Maximise GDP evaluates builds with the full −30/tick decay at your government’s satisfaction cap. Rebel-risk projections always ignore decay.',
+            type: 'choice',
+            options: [
+                { value: SATISFACTION_SAFETY_MODES.STABLE, label: 'Stable balance' },
+                { value: SATISFACTION_SAFETY_MODES.MAXIMUM, label: 'Maximise GDP' },
+            ],
+            default: SATISFACTION_SAFETY_MODES.STABLE,
+            parent: SATISFACTION_TREND_SETTING_KEY,
             section: 'Actions',
         });
         core.settings.define({
@@ -432,7 +446,8 @@ export const actionsModule = {
                         el('span', {}, ['Next tick:']),
                         el('span', {}, [
                             el('strong', {}, [core.commas(satisfactionProjection.nextTickSatisfaction)]),
-                            ` satisfaction (currently ${signed(satisfactionProjection.perTickAfter)}/tick)`,
+                            ` satisfaction (projected ${signed(
+                                satisfactionProjection.perTickWithoutDecayAfter)}/tick, decay ignored)`,
                         ]),
                     ]));
                 } else {
@@ -445,7 +460,8 @@ export const actionsModule = {
                         el('span', {}, ['Next tick:']),
                         el('span', {}, [
                             el('strong', {}, [core.commas(satisfactionProjection.nextTickSatisfaction)]),
-                            ` satisfaction (projected ${signed(satisfactionProjection.perTickAfter)}/tick)`,
+                            ` satisfaction (projected ${signed(
+                                satisfactionProjection.perTickWithoutDecayAfter)}/tick, decay ignored)`,
                         ]),
                     ]));
                 }
@@ -475,10 +491,14 @@ export const actionsModule = {
                 const heading = satisfactionProjection.perTickBefore >= 0
                     ? 'This action would make satisfaction decrease each tick.'
                     : 'This action would make the existing satisfaction decline worse.';
+                const rateLabel = satisfactionProjection.satisfactionMode
+                    === SATISFACTION_SAFETY_MODES.MAXIMUM
+                    ? 'Satisfaction/tick at cap:'
+                    : 'Satisfaction/tick (decay ignored):';
                 body.push(el('div', { class: 'alert alert-warning' }, [
                     el('strong', { class: 'clop-action-satisfaction-title' }, [heading]),
                     el('div', { class: 'clop-action-satisfaction-summary' }, [
-                        el('span', {}, ['Satisfaction/tick:']),
+                        el('span', {}, [rateLabel]),
                         el('span', {}, [
                             el('strong', {}, [signed(satisfactionProjection.perTickBefore)]),
                             ' → ', el('strong', {}, [signed(satisfactionProjection.perTickAfter)]),
@@ -604,7 +624,8 @@ export const actionsModule = {
                     const risks = projectActionRisks(
                         state.expected, submission.times, stats, BUILDING_UPKEEP);
                     const satisfactionProjection = projectActionSatisfaction(
-                        state.expected, submission.times, stats, BUILDING_EFFECTS);
+                        state.expected, submission.times, stats, BUILDING_EFFECTS,
+                        core.settings.get(SATISFACTION_SAFETY_MODE_SETTING_KEY));
                     const showSatisfactionTrend = !!core.settings.get(
                         SATISFACTION_TREND_SETTING_KEY);
                     const resourceRateRisks = core.settings.get(RESOURCE_TREND_SETTING_KEY)

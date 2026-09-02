@@ -1,11 +1,18 @@
 import { upkeepRiskForChange } from './upkeep-safety.js';
 import {
-    NATION_COLLAPSE_THRESHOLD, REBEL_SATISFACTION_THRESHOLDS,
+    MAX_SATISFACTION_DECAY, NATION_COLLAPSE_THRESHOLD,
+    REBEL_SATISFACTION_THRESHOLDS, satisfactionDecayPenalty,
 } from './satisfaction-safety.js';
 
 export {
-    NATION_COLLAPSE_THRESHOLD, REBEL_SATISFACTION_THRESHOLDS,
+    MAX_SATISFACTION_DECAY, NATION_COLLAPSE_THRESHOLD,
+    REBEL_SATISFACTION_THRESHOLDS,
 } from './satisfaction-safety.js';
+
+export const SATISFACTION_SAFETY_MODES = Object.freeze({
+    STABLE: 'stable',
+    MAXIMUM: 'maximum',
+});
 
 export function normalizeActionText(text) {
     return String(text || '').replace(/\s+/g, ' ').trim();
@@ -175,29 +182,45 @@ function buildingSatisfaction(counts, buildingEffects) {
 }
 
 // Project the satisfaction effects caused by this action without attempting
-// to simulate unrelated production chains. The Overview's current net rate
-// remains the baseline; only building counts changed by the action are
-// applied here, including nonlinear environmental damage and cleaners.
-export function projectActionSatisfaction(action, times, stats, buildingEffects = {}) {
+// to simulate unrelated production chains. The Overview's displayed rate is
+// converted back to its underlying, decay-free rate, then only building
+// counts changed by the action are applied, including nonlinear
+// environmental damage and cleaners. The selected strategy controls trend
+// warnings; immediate rebel/collapse checks are always decay-free.
+export function projectActionSatisfaction(
+    action, times, stats, buildingEffects = {}, satisfactionMode = SATISFACTION_SAFETY_MODES.STABLE,
+) {
     if (!stats || stats.satisfaction === null || stats.satisfaction === undefined
         || stats.satisfactionPerTick === null || stats.satisfactionPerTick === undefined) return null;
     const satisfactionBefore = Number(stats && stats.satisfaction);
-    const perTickBefore = Number(stats && stats.satisfactionPerTick);
+    const displayedPerTickBefore = Number(stats && stats.satisfactionPerTick);
     const { effectiveTimes, before: beforeCounts, after: afterCounts } =
         projectedBuildingCounts(action, times, stats, buildingEffects);
-    if (!effectiveTimes || !Number.isFinite(satisfactionBefore) || !Number.isFinite(perTickBefore)) return null;
+    if (!effectiveTimes || !Number.isFinite(satisfactionBefore)
+        || !Number.isFinite(displayedPerTickBefore)) return null;
 
     const beforeBuildings = buildingSatisfaction(beforeCounts, buildingEffects);
     const afterBuildings = buildingSatisfaction(afterCounts, buildingEffects);
     const perTickChange = (afterBuildings.base - beforeBuildings.base)
         - (afterBuildings.environmentalPenalty - beforeBuildings.environmentalPenalty);
+    const currentDecay = satisfactionDecayPenalty(satisfactionBefore, stats.government);
+    const perTickWithoutDecayBefore = displayedPerTickBefore + currentDecay;
+    const modeledDecay = satisfactionMode === SATISFACTION_SAFETY_MODES.MAXIMUM
+        ? MAX_SATISFACTION_DECAY
+        : 0;
+    const perTickBefore = perTickWithoutDecayBefore - modeledDecay;
     const perTickAfter = perTickBefore + perTickChange;
+    const perTickWithoutDecayAfter = perTickWithoutDecayBefore + perTickChange;
     const immediateChange = (Number(action.satisfaction) || 0) * effectiveTimes;
     const satisfactionAfter = satisfactionBefore + immediateChange;
-    const nextTickSatisfaction = satisfactionAfter + perTickAfter;
+    // Immediate rebel/collapse safety always uses the decay-free rate.  Once
+    // satisfaction has fallen anywhere near those limits the decay is zero;
+    // carrying today's high-satisfaction penalty down there is incorrect.
+    const nextTickSatisfaction = satisfactionAfter + perTickWithoutDecayAfter;
     const nextTickChange = immediateChange + perTickChange;
-    if (![perTickChange, perTickAfter, immediateChange, satisfactionAfter,
-        nextTickSatisfaction, nextTickChange]
+    if (![perTickChange, currentDecay, perTickWithoutDecayBefore, modeledDecay,
+        perTickBefore, perTickAfter, perTickWithoutDecayAfter, immediateChange,
+        satisfactionAfter, nextTickSatisfaction, nextTickChange]
         .every(Number.isSafeInteger)) return null;
 
     const rebelThreshold = REBEL_SATISFACTION_THRESHOLDS[stats.government];
@@ -214,6 +237,12 @@ export function projectActionSatisfaction(action, times, stats, buildingEffects 
         satisfactionBefore,
         immediateChange,
         satisfactionAfter,
+        displayedPerTickBefore,
+        currentDecay,
+        satisfactionMode,
+        modeledDecay,
+        perTickWithoutDecayBefore,
+        perTickWithoutDecayAfter,
         perTickBefore,
         perTickChange,
         perTickAfter,

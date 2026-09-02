@@ -7,7 +7,10 @@ import {
     RESOURCE_STATS_CACHE_KEY, resourceBufferSummary, resourceTicksWorth,
 } from '../src/adapters/overview.js';
 import { HEADER_PROBE_PAGE } from '../src/adapters/header.js';
-import { satisfactionTicksWorth } from '../src/lib/satisfaction-safety.js';
+import {
+    MAX_SATISFACTION_DECAY, satisfactionDecayPenalty,
+    satisfactionPerTickWithoutDecay, satisfactionTicksWorth,
+} from '../src/lib/satisfaction-safety.js';
 import {
     isOverviewDestination, liveUpdatesModule, overviewMenuAnchors,
     overviewMenuBadgeCounts, resourceBufferTitleMarker,
@@ -129,6 +132,33 @@ test('counts safe satisfaction ticks to the government rebel limit', () => {
     assert.equal(satisfactionTicksWorth({
         satisfaction: -95, satisfactionPerTick: -5, government: 'Unknown Government',
     }), null);
+});
+
+test('reconstructs the decay-free satisfaction rate from the Overview display', () => {
+    assert.equal(satisfactionDecayPenalty(421, 'Loose Despotism'), 3);
+    assert.equal(satisfactionPerTickWithoutDecay({
+        satisfaction: 421, satisfactionPerTick: -2, government: 'Loose Despotism',
+    }), 1);
+    assert.equal(satisfactionDecayPenalty(1000, 'Loose Despotism'), MAX_SATISFACTION_DECAY);
+    assert.equal(satisfactionDecayPenalty(1250, 'Solar Vassal'), MAX_SATISFACTION_DECAY);
+    assert.equal(satisfactionDecayPenalty(1500, 'Democracy'), MAX_SATISFACTION_DECAY);
+    assert.equal(satisfactionDecayPenalty(2500, 'Independence'), MAX_SATISFACTION_DECAY);
+    assert.equal(satisfactionDecayPenalty(7000, 'Transponyism'), MAX_SATISFACTION_DECAY);
+    assert.equal(satisfactionPerTickWithoutDecay({
+        satisfaction: null, satisfactionPerTick: null, government: 'Loose Despotism',
+    }), null);
+});
+
+test('never treats temporary high-satisfaction decay as a path to rebels', () => {
+    assert.equal(satisfactionTicksWorth({
+        satisfaction: 1000, satisfactionPerTick: -30, government: 'Loose Despotism',
+    }), null, 'a structurally balanced nation will stabilize as decay falls');
+    assert.equal(satisfactionTicksWorth({
+        satisfaction: 1000, satisfactionPerTick: -25, government: 'Loose Despotism',
+    }), null, 'positive underlying satisfaction cannot reach rebels');
+    assert.equal(satisfactionTicksWorth({
+        satisfaction: 1000, satisfactionPerTick: -35, government: 'Loose Despotism',
+    }), 220, 'an underlying -5/tick rate is projected without the -30 decay');
 });
 
 test('folds satisfaction into the shared warning and critical counts', () => {
