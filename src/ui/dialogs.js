@@ -20,8 +20,10 @@ export const dialogsModule = {
             body.clop-confirm-open { overflow: hidden; }
             .clop-confirm-overlay { position: fixed; top: 0; right: 0; bottom: 0; left: 0; z-index: 10050; display: flex; align-items: center; justify-content: center; box-sizing: border-box; padding: 20px; background: rgba(0,0,0,.58); }
             .clop-confirm-panel { width: 560px; max-width: 92vw; margin: 0; text-align: left; }
-            .clop-confirm-panel .panel-heading { font-size: 16px; }
-            .clop-confirm-panel .panel-heading .close { line-height: 1; }
+            .clop-confirm-panel .panel-heading { display: flex; align-items: flex-start; gap: 10px; font-size: 16px; }
+            .clop-confirm-heading-text { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+            .clop-confirm-source { display: block; margin-bottom: 3px; font-size: 12px; font-weight: normal; line-height: 1.4; opacity: .75; }
+            .clop-confirm-panel .panel-heading .close { order: 1; flex: none; float: none; line-height: 1; }
             .clop-confirm-panel .panel-body { max-height: 65vh; overflow-y: auto; }
             .clop-confirm-panel .panel-body > :last-child { margin-bottom: 0; }
             .clop-confirm-actions { text-align: right; }
@@ -43,6 +45,7 @@ export const dialogsModule = {
                 const dismissPrimary = alertOnly || options.dismissPrimary === true;
                 const previousFocus = document.activeElement;
                 const id = `clop-confirm-title-${++sequence}`;
+                const sourceId = `clop-confirm-source-${sequence}`;
                 const bodyId = `clop-confirm-body-${sequence}`;
                 let settled = false;
                 let cleanup = null;
@@ -83,12 +86,17 @@ export const dialogsModule = {
                     class: 'panel panel-default clop-confirm-panel',
                     role: 'alertdialog',
                     'aria-modal': 'true',
-                    'aria-labelledby': id,
+                    'aria-labelledby': `${sourceId} ${id}`,
                     'aria-describedby': bodyId,
                 }, [
                     core.el('div', { class: 'panel-heading' }, [
                         close,
-                        core.el('strong', { id }, [options.title || 'Please confirm']),
+                        core.el('div', { class: 'clop-confirm-heading-text' }, [
+                            core.el('span', { id: sourceId, class: 'clop-confirm-source' }, [
+                                options.source === 'game' ? 'Game response' : '4clopX',
+                            ]),
+                            core.el('strong', { id }, [options.title || 'Please confirm']),
+                        ]),
                     ]),
                     body,
                     core.el('div', { class: 'panel-footer clop-confirm-actions' },

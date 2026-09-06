@@ -4,6 +4,7 @@ import { dialogsModule } from '../src/ui/dialogs.js';
 import { affordabilityDialogOptions } from '../src/ui/affordability-warning.js';
 import { upkeepRiskListItem } from '../src/ui/upkeep-warning.js';
 import { upkeepRiskForChange } from '../src/lib/upkeep-safety.js';
+import { feedbackModule } from '../src/ui/feedback.js';
 
 // Minimal DOM for exercising the real dialog event/Promise lifecycle without
 // a browser dependency. Native details layout and styling need browser review.
@@ -54,6 +55,34 @@ function dialogHarness(t) {
 }
 
 const shortages = [{ name: 'Copper', required: 50, stock: 35, shortage: 15 }];
+
+test('dialog headers identify script confirmations and game responses without changing titles', async (t) => {
+    const { core, nodes } = dialogHarness(t);
+    feedbackModule.init(core);
+    for (const [show, source, title] of [
+        [() => core.confirm({ title: 'Please confirm' }), '4clopX', 'Please confirm'],
+        [() => core.feedback.error('Connection lost.'), '4clopX', 'Something went wrong'],
+        [() => core.feedback.fromMessages({ errors: ['Not enough bits.'] }), 'Game response', 'Action failed'],
+        [() => core.feedback.fromMessages({}, {
+            additionalErrors: ['Could not refresh the Overview.'], errorTitle: 'Overview refresh failed',
+        }), '4clopX', 'Overview refresh failed'],
+    ]) {
+        const result = show();
+        await Promise.resolve();
+        const label = nodes.findLast((node) => node.attrs.class === 'clop-confirm-source');
+        const heading = nodes.findLast((node) => node.tag === 'strong');
+        const panel = nodes.findLast((node) => node.attrs.role === 'alertdialog');
+        assert.equal(label.textContent, source);
+        assert.equal(heading.textContent, title);
+        assert.equal(panel.attrs['aria-labelledby'], `${label.attrs.id} ${heading.attrs.id}`);
+        const close = nodes.findLast((node) => node.attrs.class === 'close');
+        assert.equal(label.parent, heading.parent);
+        assert.equal(label.parent.attrs.class, 'clop-confirm-heading-text');
+        assert.equal(close.parent, label.parent.parent, 'close button has its own header layout slot');
+        close.click();
+        await result;
+    }
+});
 
 test('affordability defaults to OK and offers a direct attempt only without other warnings', async (t) => {
     const { core, doc, nodes } = dialogHarness(t);

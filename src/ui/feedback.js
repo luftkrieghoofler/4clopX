@@ -186,6 +186,9 @@ export const feedbackModule = {
                         messageContent(messages.infos)));
                 }
                 return core.alert({
+                    // A refresh failure is reported by the script, even when
+                    // accompanied by messages from the preceding game response.
+                    source: normalizedMessages(options.additionalErrors || []).length ? 'script' : 'game',
                     title: options.errorTitle || 'Action failed',
                     body,
                     dismissLabel: options.dismissLabel || 'Close',
