@@ -7,6 +7,7 @@
 
 import { parseResourceStats, publishResourceStats } from '../adapters/overview.js';
 import { isLoggedInDoc } from '../adapters/session.js';
+import { bindOverviewBuildings } from './overview-buildings.js';
 
 import {
     contentSignature as overviewContentSignature,
@@ -58,9 +59,9 @@ export const overviewModule = {
             return networkRefresh;
         }
 
-        // Public seam for the upcoming in-place favourite-action and building
-        // mutations: after their POST, they can call this same refresh path.
+        // Favourite actions and building controls share this refresh path.
         core.overview = { refresh, applyDocument };
+        bindOverviewBuildings(core);
 
         core.events.on('overview:document', ({ document: sourceDoc } = {}) => {
             if (!sourceDoc) return;
