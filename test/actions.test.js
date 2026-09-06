@@ -17,9 +17,10 @@ import {
     projectActionRisks, projectActionSatisfaction, SATISFACTION_SAFETY_MODES,
 } from '../src/lib/action-safety.js';
 import {
-    actionsModule, burnOilOutcome, isDynamicFavouriteSubmission,
+    actionsModule, burnOilOutcome,
     SATISFACTION_SAFETY_MODE_SETTING_KEY,
 } from '../src/ui/actions.js';
+import { isDynamicActionSubmission } from '../src/ui/action-submission.js';
 
 test('pairs original action mechanics with their original descriptions', () => {
     assert.equal(Object.keys(ACTION_CATALOG).length, 62);
@@ -748,24 +749,36 @@ test('does not mistake embedded favourite-removal controls for performed actions
     });
 });
 
-test('makes perform and remove submissions dynamic only in Overview favourites', () => {
+test('makes actions and favourite editing dynamic on all three action pages', () => {
     const favouriteForm = {
         querySelector: (selector) => selector === 'input[name="token_favoriteactions"]'
             ? { value: 'token' }
             : null,
     };
-    const ordinaryForm = { querySelector: () => null };
+    const ordinaryForm = {
+        querySelector: (selector) => selector === 'input[name="token_actions"]'
+            ? { value: 'token' } : null,
+    };
 
-    assert.equal(isDynamicFavouriteSubmission(
+    assert.equal(isDynamicActionSubmission(
         'overview.php', favouriteForm, { name: 'perform' }), true);
-    assert.equal(isDynamicFavouriteSubmission(
+    assert.equal(isDynamicActionSubmission(
         'overview.php', favouriteForm, { name: 'remove' }), true);
-    assert.equal(isDynamicFavouriteSubmission(
+    assert.equal(isDynamicActionSubmission(
         'overview.php', favouriteForm, null), true, 'Enter-key submission performs the action');
-    assert.equal(isDynamicFavouriteSubmission(
-        'favoriteactions.php', favouriteForm, { name: 'perform' }), false);
-    assert.equal(isDynamicFavouriteSubmission(
+    assert.equal(isDynamicActionSubmission(
+        'favoriteactions.php', favouriteForm, { name: 'perform' }), true);
+    assert.equal(isDynamicActionSubmission(
+        'favoriteactions.php', favouriteForm, { name: 'remove' }), true);
+    assert.equal(isDynamicActionSubmission(
         'overview.php', ordinaryForm, { name: 'perform' }), false);
+    assert.equal(isDynamicActionSubmission('actions.php', ordinaryForm, { name: '' }), true);
+    assert.equal(isDynamicActionSubmission('actions.php', ordinaryForm, null), true);
+    assert.equal(isDynamicActionSubmission('actions.php', ordinaryForm, { name: 'favorite' }), true);
+    assert.equal(isDynamicActionSubmission('actions.php', ordinaryForm, { name: 'other' }), false);
+    assert.equal(isDynamicActionSubmission('reports.php', favouriteForm, null), false);
+    assert.equal(isDynamicActionSubmission('actions.php', favouriteForm, null), false);
+    assert.equal(isDynamicActionSubmission('actions.php', null, null), false);
 });
 
 test('reads the stock game tick countdown and applies a strict ten-minute threshold', () => {

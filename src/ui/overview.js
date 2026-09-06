@@ -8,45 +8,12 @@
 import { parseResourceStats, publishResourceStats } from '../adapters/overview.js';
 import { isLoggedInDoc } from '../adapters/session.js';
 
-export function overviewContentSignature(doc) {
-    const content = doc && doc.querySelector && doc.querySelector('#content');
-    return content ? content.innerHTML : null;
-}
+import {
+    contentSignature as overviewContentSignature,
+    replacePageContent as replaceOverviewContent, initialiseMasonry,
+} from './page-content.js';
 
-export function replaceOverviewContent(currentDoc, sourceDoc, previousSignature) {
-    const current = currentDoc && currentDoc.querySelector
-        && currentDoc.querySelector('#content');
-    const source = sourceDoc && sourceDoc.querySelector
-        && sourceDoc.querySelector('#content');
-    if (!current || !source) {
-        return { available: false, changed: false, signature: previousSignature };
-    }
-
-    const signature = source.innerHTML;
-    if (signature === previousSignature) {
-        return { available: true, changed: false, signature };
-    }
-
-    const imported = [...source.childNodes].map((node) => currentDoc.importNode(node, true));
-    current.replaceChildren(...imported);
-    return { available: true, changed: true, signature };
-}
-
-function initialiseMasonry(root) {
-    if (typeof window === 'undefined') return;
-    const pageWindow = typeof unsafeWindow !== 'undefined' ? unsafeWindow : window;
-    const Masonry = pageWindow.Masonry || window.Masonry;
-    if (typeof Masonry !== 'function') return;
-    // Masonry's data-attribute bootstrap only runs on the initial page load.
-    // Recreate those layouts after inserting freshly fetched panels.
-    for (const container of root.querySelectorAll('.js-masonry')) {
-        let options = {};
-        try {
-            options = JSON.parse(container.getAttribute('data-masonry-options') || '{}');
-        } catch (e) { /* retain Masonry's defaults */ }
-        try { new Masonry(container, options); } catch (e) { /* layout is optional */ }
-    }
-}
+export { overviewContentSignature, replaceOverviewContent };
 
 export const overviewModule = {
     name: 'overview',

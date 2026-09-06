@@ -5,7 +5,6 @@ import {
     formatTickDuration, tickIsCritical, tickIsImminent, tickSecondsFromDocument,
 } from '../adapters/header.js';
 import { fetchResourceStats } from '../adapters/overview.js';
-import { isLoggedInDoc } from '../adapters/session.js';
 import { ACTION_CATALOG, BUILDING_EFFECTS, BUILDING_UPKEEP } from '../data/actions.generated.js';
 import {
     actionCompatibility, actionNeedsSafetyCheck, projectActionAffordability, projectActionResourceRates,
@@ -15,6 +14,8 @@ import { protectedReserve, reserveSafeMax } from '../lib/upkeep-safety.js';
 import { upkeepWarningSection } from './upkeep-warning.js';
 import { rateRiskListItem, warningGroup, warningSection } from './warning-content.js';
 import { affordabilityDialogOptions } from './affordability-warning.js';
+import { executeDynamicAction, isDynamicActionSubmission, replaceActionContent } from './action-submission.js';
+import { initialiseMasonry } from './page-content.js';
 
 const SETTING_KEY = 'actions.confirmUpkeepRisk';
 const SATISFACTION_TREND_SETTING_KEY = 'actions.confirmNegativeSatisfactionRate';
@@ -67,12 +68,6 @@ export function burnOilOutcome(times, satisfaction) {
         satisfactionLost,
         satisfactionAfter,
     };
-}
-
-export function isDynamicFavouriteSubmission(page, form, submitter) {
-    if (page !== 'overview.php' || !form || !form.querySelector(
-        'input[name="token_favoriteactions"]')) return false;
-    return !submitter || submitter.name === 'perform' || submitter.name === 'remove';
 }
 
 export const actionsModule = {
@@ -130,6 +125,7 @@ export const actionsModule = {
         const states = new Map();
         const boundForms = new WeakSet();
         let loadError = null;
+        let actionPending = false;
 
         core.addStyle(`
             #clop-action-compat-summary { max-width: 820px; margin: 0 auto 12px; text-align: left; }
@@ -148,7 +144,7 @@ export const actionsModule = {
             form.clop-action-checking { opacity: .7; pointer-events: none; }
         `);
 
-        const actualActionsPromise = page === 'actions.php'
+        let actualActionsPromise = page === 'actions.php'
             ? Promise.resolve(actionsFromDocument(document))
             : core.http.getDoc('actions.php').then(actionsFromDocument).catch((error) => {
                 loadError = error;
@@ -358,61 +354,32 @@ export const actionsModule = {
             }
         }
 
-        function setSubmitterLabel(submitter, label) {
-            if (!submitter) return;
-            if ('value' in submitter) submitter.value = label;
-            else submitter.textContent = label;
-        }
-
         async function submitForm(form, submitter) {
-            if (!isDynamicFavouriteSubmission(page, form, submitter) || !core.overview) {
+            if (!isDynamicActionSubmission(page, form, submitter)) {
                 HTMLFormElement.prototype.submit.call(form);
                 return;
             }
-
-            const removing = submitter && submitter.name === 'remove';
-            const submitterValue = submitter && (submitter.dataset.clopOldLabel
-                || submitter.value || submitter.textContent);
-            setSubmitterLabel(submitter, removing ? 'Removing…' : 'Performing…');
-            let response;
-            try {
-                const params = new FormData(form);
-                if (submitter && submitter.name) params.append(submitter.name, submitterValue);
-                response = await core.http.postForm(
-                    form.getAttribute('action') || 'favoriteactions.php', params);
-                if (!isLoggedInDoc(response)) throw new Error('The game session has expired.');
-            } catch (error) {
-                console.warn('[4clopX] favourite action request failed:', error);
-                core.feedback.error(
-                    `Could not confirm whether the ${removing ? 'removal' : 'action'} succeeded ` +
-                    `(${String(error.message || error)}). Reload the Overview before trying again.`, {
-                        title: removing ? 'Favourite removal failed' : 'Action request failed',
-                    });
-                return;
-            }
-
-            try {
-                await core.overview.refresh();
-                core.feedback.fromDocument(response, {
-                    successTitle: removing ? 'Favourite removed' : 'Action complete',
-                    errorTitle: removing ? 'Could not remove favourite' : 'Action failed',
-                    fallbackMessage: removing
-                        ? 'The favourite was removed.'
-                        : 'The action was processed.',
-                });
-            } catch (error) {
-                // The POST may already have succeeded.  Preserve its server
-                // feedback, but explicitly discourage a blind retry while
-                // the visible data and single-use token may be stale.
-                core.feedback.fromDocument(response, {
-                    errorTitle: 'Overview refresh failed',
-                    additionalErrors: [
-                        `The server answered, but the Overview could not be refreshed ` +
-                        `(${String(error.message || error)}). Reload the page before trying again.`,
-                    ],
-                });
-                console.warn('[4clopX] Overview refresh after favourite action failed:', error);
-            }
+            await executeDynamicAction(core, { page, form, submitter, refresh: async (response) => {
+                if (page === 'overview.php') {
+                    await core.overview.refresh();
+                    return;
+                }
+                const scroll = { left: window.scrollX, top: window.scrollY };
+                replaceActionContent(document, response);
+                if (page === 'actions.php') {
+                    // Recheck compatibility against the new, unannotated page.
+                    states.clear();
+                    actualActionsPromise = Promise.resolve(actionsFromDocument(response));
+                }
+                bindForms();
+                setTimeout(() => {
+                    initialiseMasonry(document);
+                    window.scrollTo(scroll);
+                }, 0);
+                // Update shared stock/buffer badges after spending resources,
+                // just as refreshing Overview does after its inline actions.
+                await fetchResourceStats(core);
+            } });
         }
 
         function actionConfirm(options) {
@@ -604,22 +571,26 @@ export const actionsModule = {
                     const submitter = event.submitter || clickedSubmitter;
                     clickedSubmitter = null;
                     const submission = submittedAction(record.form, submitter);
-                    const dynamic = isDynamicFavouriteSubmission(page, record.form, submitter)
-                        && !!core.overview;
+                    const dynamic = isDynamicActionSubmission(page, record.form, submitter);
                     if (!submission || !core.settings.get(SETTING_KEY)) {
                         if (!dynamic) return;
                         event.preventDefault();
-                        if (record.form.classList.contains('clop-action-checking')) return;
+                        if (actionPending) return;
+                        actionPending = true;
                         setChecking(record.form, submitter, true);
                         try {
                             await submitForm(record.form, submitter);
                         } finally {
+                            actionPending = false;
                             setChecking(record.form, submitter, false);
                         }
                         return;
                     }
                     event.preventDefault();
-                    if (record.form.classList.contains('clop-action-checking')) return;
+                    // All recipe forms share a rotating token. Do not queue a
+                    // second action while the first is checking or refreshing.
+                    if (actionPending) return;
+                    actionPending = true;
                     setChecking(record.form, submitter, true);
 
                     try {
@@ -714,6 +685,7 @@ export const actionsModule = {
                             await submitForm(record.form, submitter);
                         }
                     } finally {
+                        actionPending = false;
                         setChecking(record.form, submitter, false);
                     }
                 });
