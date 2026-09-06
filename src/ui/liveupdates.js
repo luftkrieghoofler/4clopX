@@ -285,7 +285,7 @@ export const liveUpdatesModule = {
             label: 'Live update interval while a tab is visible (seconds)',
             description: 'How often to check while some game tab is being looked at.',
             type: 'number',
-            default: 30,
+            default: 60,
             onChange: () => core.events.emit('live:intervalChanged', {}),
         });
         core.settings.define({
@@ -294,7 +294,7 @@ export const liveUpdatesModule = {
             label: 'Live update interval in the background (seconds)',
             description: 'How often to check while no game tab is visible.',
             type: 'number',
-            default: 120,
+            default: 60,
             onChange: () => core.events.emit('live:intervalChanged', {}),
         });
         core.settings.define({

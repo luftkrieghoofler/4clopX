@@ -1,40 +1,55 @@
 # 4clopX - CLOP Dynamic UI userscript
 
-A userscript for [CLOP](https://4clop.org) that replaces the marketplace with a dynamic single-page UI, adds optional auto-login and live refresh polling with desktop notification.
+A userscript for [CLOP](https://4clop.org) to improve the UI.
+ * Live updates and desktop notifications (for messages, deals, attacks, watched markets and more)
+ * A completely overhauled marketplace UI - tabbed item views, in-place refreshing
+ * A shortcut bar to easily access your most frequently used in-game pages, markets, etc. - save any game view as a shortcut!
+ * Auto-login - if you choose to save your username and password in the script, seamlessly re-logs you when the game session expires
+ * Safety checks for all actions (building, selling, etc.), showing a warning if you would put your nation in danger
+    * Never accidentally burn 5x as much oil as you intended putting your nation in instakill range, ever again!
+ * Stockpile monitoring and notifications when they run low
 
 ## Install
 
-Install a userscript manager (Violentmonkey, Tampermonkey, or Greasemonkey), then install [`clop.user.js` from the latest release](https://github.com/luftkrieghoofler/4clopX/releases/latest/download/clop.user.js). Updates arrive through the manager's normal update check. To build from source instead, see [DEVELOPMENT.md](DEVELOPMENT.md).
+Install a userscript manager (e.g. Violentmonkey or Greasemonkey), then install [`clop.user.js` from the latest release](https://github.com/luftkrieghoofler/4clopX/releases/latest/download/clop.user.js). Updates arrive through the manager's normal update check.
 
-## What changes
+On mobile, Firefox supports extensions and therefore userscripts.
 
-**Live updates and notifications**: the stock notifications (messages, alliance, incoming attacks etc.), alliance marketplace orders, and open marketplace pages refresh periodically without reloading the page, and support desktop notifications. Click on the the timer in the navbar to refresh immediately.
-
-**Auto-login**: if enabled, when the game expires your session the script logs you back in and takes you to the page you were trying to open instead of the login screen.
-
-**Shortcut bar**: save frequently used destinations in a sticky row below the stock navigation. The 🔖 button saves the current view - any page should be supported, even individual markets. Shortcuts can be renamed and reordered from the shortcut manager in ⚙ settings.
-
-**Safe actions**: Actions and Favourite Actions are checked against your current stock, upkeep, production, and satisfaction before they run. A confirmation dialogue protects against actions that could cause upkeep or satisfaction issues. Also shows a reminder for Burn Oil to prevent the classic mistake of burning 5x too much.
-
-**Safe deals**: before accepting an incoming deal, the resources you give and receive are checked against fresh stock and upkeep data. A confirmation protects against accepting a deal that would leave too little stock for tick consumption and military upkeep.
-
-**Marketplace**:
-
-- Sell orders and buy orders become one page with two tabs. Switching sides, switching resources, buying, selling, placing and removing orders all happen in place, without page loads. The stock menu entries still work and open the side they always led to.
-- No more "Try again." on refresh; there is a proper Refresh button, and page reload works seamlessly in the market.
-- Resource tabs have a toggle to hide DNA resources and one to show ★ favourites only, to declutter the amount of tabs.
-- Prices are shown as what you'll actually pay or receive (your economic-type multipliers applied), including live totals for Buy All / Sell All and custom amounts. Sell listings can be priced per item or from a desired total after tax.
-- When selling to buy orders, your upkeep is protected: the sell button is **Sell All** when you can fill the whole order, and turns into **Sell Max** selling exactly your spare stock when filling it all would cut into your upkeep.
-- An (optional) confirmation dialog protects against accidentally selling off stockpiles you need for upkeep, or selling away a resource that you don't produce yourself.
-- Orders from outside your alliance and friends can be shown normally, faded, or hidden; your own orders always remain visible.
-- Tabs can show how much alliance mates and friends are trading in each ★ favourite market you 👁 watch, optionally also including resources where your stockpiles are empty. These auto-refresh with the live update timer and can generate desktop notifications.
+To build from source instead, see [DEVELOPMENT.md](DEVELOPMENT.md).
 
 ## More info
 
-**Favourite and watched markets.** A badge like `[2 (68)]` on a resource tab means alliance mates (green names) and friends (blue names) have 2 open orders totalling 68 units in that market, on the current side. Filled badges are actionable; outlined badges show resource buy orders that you cannot currently fulfil because you have no stock spare above upkeep (including the military reserve). Keeping counts up to date costs one extra request per watched market per refresh, so badges are only maintained for 👁 watched markets — chosen in the ⚙ settings among your ★ favourites; watch the few you actually follow. Other markets refresh when you open their tab. Favourite tabs and the currently open market always stay visible — favouriting a DNA market is also how you keep it around while "show DNA" is off.
+### Live updates and notifications
+Every 60s by default, the scripts checks the stock notifications (messages, alliance, incoming attacks etc.), watched markets, and resource usage; new events are show in the tab title and support desktop notifications. Click on the the timer in the navbar to refresh immediately.
 
-**Sell All / Sell Max.** The script reserves your upkeep — the per-tick "Used" amounts from the Overview plus the military's 12-hour resource consumption — when selling into buy orders. When your stock is insufficient to cover the entire order, the **Sell All** buttons turns into **Sell Max (N: X bits)** that sells only what you can spare. (A similar **Max** button exists when creating a sell listing on sell-side markets, prefilling the listing amount to your stockpile minus your upkeep.) Obviously, if you plan on building more buildings on your nation within the same tick, don't sell off your entire stockpile as you won't be left with anything to spare for the new buildings!
+If the game session expires in the background, auto-login is required to keep watching (see below). If autologin is disabled, don't rely on notifications, since sessions are relatively short-lived.
 
-**Auto-login.** Tick "Auto-login (remember credentials)" on the login form to enable it; logging in with it unticked erases the stored credentials. They are kept in the userscript manager's script-private storage, which site scripts (including any XSS on the site) cannot read — but on disk they are unencrypted, like most browser-stored data. That's probably fine, but bear it in mind if you're security-minded or already use a password manager. After a "Login incorrect." response the feature disables itself (the server rate-limits failed logins) until you log in manually with the checkbox ticked again.
+### Auto-login
+If enabled (tick "Auto-login (remember credentials)" on the login form), when the game expires your session the script logs you back in and takes you to the page you were trying to open instead of the login screen.
 
-**Live updates.** Checks every 30 seconds while some game tab is visible and every 2 minutes otherwise (configurable in settings). If the login session expires in the background, the check logs back in using the stored auto-login credentials, or stops (the navbar timer shows ✖) if there are none - so auto-login is useful for reliable notifications. Market menu badges count alliance/friend orders across watched markets. By default buy-order favourites are watched (the orders you can sell into) and sell listings are not; this can be changed per market in the ⚙ settings; a currently open market tab is also live-updated.
+Your username and password are kept in the userscript manager's script-private storage, which websites (including 4clop or other userscripts) cannot read; however, browser storage is saved on disk unencrypted, so it's not quite as secure as a real password manager. As mentioned above, enabling this is necessary for the live refresh polling to be able to log back in if the session expires.
+
+The stored values can be deleted in the 4clopX settings, or by logging out and unchecking the "Auto-login" checkbox when logging in again.
+
+### Shortcut bar
+You can save frequently used destinations in a sticky row below the stock navigation, to avoid having to navigate submenus all the time. The 🔖 button saves the current view - any page is be supported, such as normal menu destinations (Reports, Actions, My Alliance...), links to view other nations or alliances, or even individual markets (e.g. Buy Apples). Shortcuts can be renamed and reordered from the shortcut manager in ⚙ settings.
+
+### Safe actions
+Most actions you can take - Actions, Favourite Actions, buying/selling on the market, accepting Deals, etc. - are checked against your current stock, upkeep, production, and satisfaction before they run. If completing the action would cause issues, such as eating into your upkeep for the next tick or making your nation unsustainable, you will be asked for confirmation before proceeding.
+
+Most nation expansions, if done in the right build order, can be completed without clicking through almost any warnings; usually the only catch-22 that requires temporarily ignoring a warning is expanding energy infrastructure (since oil burners reduce satisfaction, but satisfaction buildings require energy). Other than this, almost all builds can be completed with peace of mind.
+
+Also shows a special reminder for Burn Oil to prevent the classic mistake of burning 5x too much.
+
+### Marketplace
+The marketplace UI is completely overhauled:
+ * Sell orders and buy orders become one page with two tabs, and every resource becomes a tab, making navigation much, much easier.
+ * No more "Try again." on refresh; page reload works seamlessly in the market. (And the currently open view auto refreshes using the live update mechanism.)
+ * Resource tabs have a toggle to hide DNA resources and one to show ★ favourites only, to declutter the amount of tabs.
+ * Tooltips show the prices you'd actually pay or receive based on your economic type and tax rate. Sell listings can be priced per item or from a desired total after tax.
+ * Similar to Safe Actions, when selling to buy orders, if you cannot fill the whole order the **Sell All** button turns into **Sell Max** to sell exactly your spare stock without cutting into your own upkeep for next tick. Obviously, don't rely on this if you plan to add more buildings to your nation before the next tick!
+ * Orders from outside your alliance and friends can be shown normally, faded, or hidden; your own orders always remain visible.
+ * Watched markets: by marking a favourite market as 👁 watched, it will be refreshed in the background at the Live Update schedule, and notifications will show how many orders your alliance mates and friends are trading in that market (with desktop notifications when new orders go up). A notification badge like `2 (68)` on a market tab means that there are 2 alliance/friend orders for a total of 68 items across them on that market. By default, resources that you have no more stock to safely sell show a greyed-out badge and no desktop notifications.
+
+### Stockpile monitoring
+By default, the Overview tab on your nation shows a yellow badge when any upkeep resource reaches 5 ticks remaining, and a red badge (with a desktop notification) when a single tick of upkeep is left. These values can be changed in the settings.
