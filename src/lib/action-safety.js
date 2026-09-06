@@ -1,4 +1,4 @@
-import { upkeepRiskForChange } from './upkeep-safety.js';
+import { affordabilityShortage, upkeepRiskForChange } from './upkeep-safety.js';
 import {
     MAX_SATISFACTION_DECAY, NATION_COLLAPSE_THRESHOLD,
     REBEL_SATISFACTION_THRESHOLDS, satisfactionDecayPenalty,
@@ -56,14 +56,35 @@ export function effectiveActionTimes(action, times, stats) {
 
 export function actionNeedsSafetyCheck(action, buildingUpkeep, buildingEffects = {}) {
     if (!action) return false;
-    if (action.items.some((item) => item.consumed && !item.isBuilding)) return true;
+    if (action.items.length) return true;
     if (Number(action.satisfaction) < 0) return true;
-    if (action.items.some((item) => item.consumed && item.isBuilding
-        && effectNeedsProjection(buildingEffects[item.resourceId]))) return true;
     return !!(action.output && action.output.isBuilding && (
         (buildingUpkeep[action.output.resourceId] || []).length
         || effectNeedsProjection(buildingEffects[action.output.resourceId])
     ));
+}
+
+export function projectActionAffordability(action, times, stats) {
+    times = effectiveActionTimes(action, times, stats);
+    if (times < 1) return [];
+    const requirements = new Map();
+    for (const item of action.items) {
+        const key = `${item.isBuilding ? 'building' : 'resource'}:${item.name.toLowerCase()}`;
+        const required = item.amount * (item.consumed ? times : 1);
+        const previous = requirements.get(key);
+        requirements.set(key, { ...item, required: (previous ? previous.required : 0) + required });
+    }
+    const shortages = [];
+    for (const item of requirements.values()) {
+        const collection = item.isBuilding ? 'buildingsByName' : 'byName';
+        const current = keyed(stats, collection, item.name)
+            // Overview omits unowned buildings and resources with no stock,
+            // production, or consumption. The verified recipe identifies them.
+            || (stats && stats[collection] ? { qty: 0 } : null);
+        const shortage = affordabilityShortage(current, item.required, item.name);
+        if (shortage) shortages.push(shortage);
+    }
+    return shortages.sort((a, b) => a.name.localeCompare(b.name));
 }
 
 // Project only immediate inventory changes and the reserve required after the

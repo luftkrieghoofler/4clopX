@@ -18,6 +18,17 @@ export function reserveSafeMax(stock, reserve, amountPerUse = 1) {
     return Math.floor(Math.max(0, stock - reserve) / amountPerUse);
 }
 
+// Check the stock required before the operation; its outputs cannot pay
+// its entry cost. Unknown stock must not be mistaken for zero.
+export function affordabilityShortage(resource, required, name = resource && resource.name) {
+    if (!resource || resource.qty == null) return null;
+    const stock = Number(resource.qty);
+    if (![stock, required].every(Number.isSafeInteger) || required <= 0 || stock >= required) return null;
+    const shortage = required - stock;
+    if (!Number.isSafeInteger(shortage)) return null;
+    return { name: name || 'Unknown resource', required, stock, shortage };
+}
+
 export function upkeepRiskForChange(resource, {
     name = resource && resource.name,
     stockChange = 0,
@@ -32,9 +43,10 @@ export function upkeepRiskForChange(resource, {
     const reserveAfter = Math.max(0, reserveBefore + reserveChange);
     if (![stockAfter, reserveAfter].every(Number.isSafeInteger)) return null;
 
-    // The server rejects an operation it cannot afford instead of allowing
-    // negative inventory, so that operation cannot create an upkeep risk.
-    if (stockAfter < 0) return null;
+    // Negative stock is still useful when reviewing an unaffordable action:
+    // the shortage includes both its missing materials and next-tick upkeep.
+    // Without upkeep there is only an affordability issue, not a second risk.
+    if (reserveAfter === 0) return null;
 
     // Do not nag about an unrelated existing shortage: the operation must
     // make stock or required reserve worse and leave the result unsafe.

@@ -8,11 +8,12 @@ import { fetchResourceStats } from '../adapters/overview.js';
 import { isLoggedInDoc } from '../adapters/session.js';
 import { ACTION_CATALOG, BUILDING_EFFECTS, BUILDING_UPKEEP } from '../data/actions.generated.js';
 import {
-    actionCompatibility, actionNeedsSafetyCheck, projectActionResourceRates,
+    actionCompatibility, actionNeedsSafetyCheck, projectActionAffordability, projectActionResourceRates,
     projectActionRisks, projectActionSatisfaction, SATISFACTION_SAFETY_MODES,
 } from '../lib/action-safety.js';
 import { protectedReserve, reserveSafeMax } from '../lib/upkeep-safety.js';
 import { upkeepWarningContent } from './upkeep-warning.js';
+import { affordabilityDialogOptions } from './affordability-warning.js';
 
 const SETTING_KEY = 'actions.confirmUpkeepRisk';
 const SATISFACTION_TREND_SETTING_KEY = 'actions.confirmNegativeSatisfactionRate';
@@ -58,7 +59,7 @@ export const actionsModule = {
         core.settings.define({
             key: SETTING_KEY,
             label: 'Confirm risky actions',
-            description: 'Before performing a known Action or Favorite Action, check protected upkeep, satisfaction, and production risks.',
+            description: 'Before performing a known Action or Favorite Action, check affordability, protected upkeep, satisfaction, and production risks.',
             type: 'bool',
             default: true,
             section: 'Actions',
@@ -427,7 +428,7 @@ export const actionsModule = {
                 }
             }
 
-            return core.confirm({
+            return core.confirm(affordabilityDialogOptions(core, options.affordability, {
                 ...options,
                 body,
                 onOpen: () => {
@@ -435,7 +436,7 @@ export const actionsModule = {
                     const timer = setInterval(updateTickWarnings, 250);
                     return () => clearInterval(timer);
                 },
-            });
+            }));
         }
 
         function unprotectedConfirmation(state) {
@@ -478,6 +479,7 @@ export const actionsModule = {
             burnOil = null,
             showSatisfactionTrend = true,
             resourceRateRisks = [],
+            affordability = [],
         } = {}) {
             const quantity = times === 1 ? action.name : `${action.name} × ${core.commas(times)}`;
             const body = [];
@@ -603,6 +605,9 @@ export const actionsModule = {
             return actionConfirm({
                 title,
                 body,
+                affordability,
+                warningCount: risks.length + resourceRateRisks.length
+                    + Number(!!hazard || satisfactionTrend),
                 confirmLabel: burnOil ? 'Burn anyway' : 'Perform anyway',
                 tickRelevant: !!hazard || risks.length > 0,
             });
@@ -703,6 +708,8 @@ export const actionsModule = {
                             })) await submitForm(record.form, submitter);
                             return;
                         }
+                        const affordability = projectActionAffordability(
+                            state.expected, submission.times, stats);
                         const risks = projectActionRisks(
                             state.expected, submission.times, stats, BUILDING_UPKEEP);
                         const satisfactionProjection = projectActionSatisfaction(
@@ -721,10 +728,10 @@ export const actionsModule = {
                         const satisfactionRisk = satisfactionProjection
                             && (satisfactionProjection.hazard
                                 || (showSatisfactionTrend && satisfactionProjection.trendRisk));
-                        if ((!risks.length && !satisfactionRisk && !resourceRateRisks.length)
+                        if ((!affordability.length && !risks.length && !satisfactionRisk && !resourceRateRisks.length)
                             || await riskConfirmation(
                                 state.expected, submission.times, risks, satisfactionProjection, {
-                                    burnOil, showSatisfactionTrend, resourceRateRisks,
+                                    burnOil, showSatisfactionTrend, resourceRateRisks, affordability,
                                 })) {
                             await submitForm(record.form, submitter);
                         }

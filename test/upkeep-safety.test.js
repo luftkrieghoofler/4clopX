@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import {
-    protectedReserve, reserveSafeMax, upkeepRiskForChange,
+    affordabilityShortage, protectedReserve, reserveSafeMax, upkeepRiskForChange,
 } from '../src/lib/upkeep-safety.js';
 
 test('combines tick consumption and military upkeep into one reserve', () => {
@@ -47,11 +47,33 @@ test('classifies upkeep increases as well as stock spending', () => {
     assert.equal(risk.shortage, 8);
 });
 
-test('ignores unrelated shortages and operations the server will reject', () => {
+test('ignores unrelated shortages but includes upkeep for unaffordable operations', () => {
     const alreadyShort = { name: 'Apples', qty: 5, used: 10, mil: 0 };
     assert.equal(upkeepRiskForChange(alreadyShort), null);
     assert.equal(upkeepRiskForChange(alreadyShort, { stockChange: 2 }), null);
-    assert.equal(upkeepRiskForChange(alreadyShort, { stockChange: -6 }), null);
+    assert.equal(upkeepRiskForChange(alreadyShort, { stockChange: -6 }).shortage, 11);
     assert.equal(upkeepRiskForChange(alreadyShort, { stockChange: -1 }).shortage, 6,
         'worsening an existing shortage still warns');
+});
+
+test('distinguishes entry-cost shortages from the extra stock needed for upkeep', () => {
+    const copper = { name: 'Copper', qty: 35, used: 10, mil: 0 };
+    assert.deepEqual(affordabilityShortage(copper, 50), {
+        name: 'Copper', required: 50, stock: 35, shortage: 15,
+    });
+    const risk = upkeepRiskForChange(copper, { stockChange: -50 });
+    assert.equal(risk.stockAfter, -15);
+    assert.equal(risk.shortage, 25);
+    assert.equal(affordabilityShortage(copper, 35), null);
+    assert.equal(upkeepRiskForChange({ ...copper, used: 0 }, { stockChange: -50 }), null,
+        'zero upkeep should not duplicate an affordability error');
+});
+
+test('does not invent affordability errors from unknown stock or invalid counts', () => {
+    assert.equal(affordabilityShortage(null, 5), null);
+    assert.equal(affordabilityShortage({}, 5), null);
+    assert.equal(affordabilityShortage({ qty: 'unknown' }, 5), null);
+    assert.equal(affordabilityShortage({ qty: 0 }, NaN), null);
+    assert.equal(affordabilityShortage({ qty: 0 }, Infinity), null);
+    assert.equal(affordabilityShortage({ qty: 0 }, -1), null);
 });

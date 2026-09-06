@@ -22,9 +22,10 @@ import {
     favouriteIds, writeFavourites, writeMarketCatalog, favouriteStorageChange,
 } from '../lib/favourites.js';
 import {
-    protectedReserve, reserveSafeMax, upkeepRiskForChange,
+    affordabilityShortage, protectedReserve, reserveSafeMax, upkeepRiskForChange,
 } from '../lib/upkeep-safety.js';
 import { upkeepRiskListItem } from './upkeep-warning.js';
+import { affordabilityDialogOptions } from './affordability-warning.js';
 
 const SIDES = [
     { side: 'sell', label: 'Sell Orders', hint: 'Listings from sellers — buy from them here.' },
@@ -454,7 +455,8 @@ export const marketplaceModule = {
             const risks = saleResourceRisks(fresh, name, amount, {
                 checkNegativeNet, checkUpkeep,
             });
-            if (!risks.upkeep && !risks.negativeNet) return true;
+            const shortage = affordabilityShortage(fresh, Number(amount), name);
+            if (!shortage && !risks.upkeep && !risks.negativeNet) return true;
 
             const actionText = `${verb} ${core.commas(amount)} ${name}`;
             const gerund = verb === 'List' ? 'Listing' : 'Selling';
@@ -463,7 +465,7 @@ export const marketplaceModule = {
                 ? 'Resource sale warnings'
                 : risks.upkeep
                     ? 'Upkeep reserve at risk'
-                    : risks.negativeNet.kind === 'imported'
+                    : risks.negativeNet?.kind === 'imported'
                         ? 'Imported stockpile warning'
                         : 'Shrinking stockpile warning';
             const heading = both
@@ -471,7 +473,7 @@ export const marketplaceModule = {
                 : risks.upkeep
                     ? [el('strong', {}, [`${gerund} would leave insufficient stock`]),
                         ' for the protected upkeep reserve (tick consumption and military upkeep).']
-                    : [el('strong', {}, [risks.negativeNet.kind === 'imported'
+                    : [el('strong', {}, [risks.negativeNet?.kind === 'imported'
                         ? 'Selling off an imported stockpile.'
                         : 'Selling a stockpile with negative net production.'])];
             const items = [];
@@ -489,20 +491,20 @@ export const marketplaceModule = {
                 ]));
             }
 
-            return core.confirm({
+            return core.confirm(affordabilityDialogOptions(core, shortage ? [shortage] : [], {
                 title,
+                warningCount: items.length,
                 body: el('div', {}, [
                     el('div', { class: 'alert alert-warning' }, heading),
                     el('ul', { class: 'clop-confirm-risk-list' }, items),
                     el('p', {}, [`${actionText} anyway?`]),
                 ]),
                 confirmLabel: `${verb} anyway`,
-            });
+            }, verb === 'List' ? 'Order was not listed:' : 'Sale was not performed:'));
         }
 
-        // Sale submissions have independent negative-net and below-upkeep
-        // confirmations. Refresh the Overview once immediately before acting
-        // so both decisions use current data; cancelling preserves form input.
+        // Refresh once before checking affordability and the enabled sale
+        // warnings together. Cancelling preserves form input.
         function regularSale(resourceId, amount, verb, action, { isMax = false } = {}) {
             const checkNet = negativeNetConfirmationEnabled(
                 core.settings.get(NEGATIVE_NET_CONFIRM_KEY), isMax);
@@ -516,8 +518,10 @@ export const marketplaceModule = {
                     const name = resourceName(resourceId);
                     const stats = await fetchResourceStats(core);
                     state.upkeep = stats;
-                    const fresh = stats.byName[name.toLowerCase()];
-                    if (fresh && !(await confirmSaleRisks(fresh, name, amount, verb, {
+                    // A known market resource absent from Overview has no
+                    // stock, production, or consumption.
+                    const fresh = stats.byName[name.toLowerCase()] || { name, qty: 0 };
+                    if (!(await confirmSaleRisks(fresh, name, amount, verb, {
                         checkNegativeNet: checkNet,
                         checkUpkeep,
                     }))) {

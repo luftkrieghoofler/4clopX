@@ -28,6 +28,10 @@ export const dialogsModule = {
             .clop-confirm-actions .btn + .btn { margin-left: 6px; }
             .clop-confirm-risk-list { margin: 10px 0 0; padding-left: 22px; }
             .clop-confirm-risk-list + p { margin-top: 12px; }
+            .clop-confirm-review { margin-top: 14px; }
+            .clop-confirm-review > summary { display: list-item; cursor: pointer; list-style: disclosure-closed inside; }
+            .clop-confirm-review[open] > summary { list-style-type: disclosure-open; }
+            .clop-confirm-review-content { margin-top: 12px; }
         `);
 
         let sequence = 0;
@@ -36,6 +40,7 @@ export const dialogsModule = {
         function show(options = {}) {
             return new Promise((resolve) => {
                 const alertOnly = options.alertOnly === true;
+                const dismissPrimary = alertOnly || options.dismissPrimary === true;
                 const previousFocus = document.activeElement;
                 const id = `clop-confirm-title-${++sequence}`;
                 const bodyId = `clop-confirm-body-${sequence}`;
@@ -47,7 +52,7 @@ export const dialogsModule = {
 
                 const cancel = core.el('button', {
                     type: 'button',
-                    class: `btn ${alertOnly ? 'btn-primary' : 'btn-default'}`,
+                    class: `btn ${dismissPrimary ? 'btn-primary' : 'btn-default'}`,
                 }, [alertOnly ? (options.dismissLabel || 'Close') : (options.cancelLabel || 'Cancel')]);
                 const proceed = core.el('button', {
                     type: 'button',
@@ -59,6 +64,21 @@ export const dialogsModule = {
                     'aria-label': alertOnly ? 'Dismiss' : 'Cancel',
                     html: '&times;',
                 });
+                let review = null;
+                if (!alertOnly && options.reviewBeforeConfirm) {
+                    const reviewBody = core.el('div', { class: 'clop-confirm-review-content' });
+                    appendContent(reviewBody, options.reviewBeforeConfirm.body);
+                    reviewBody.appendChild(core.el('div', { class: 'clop-confirm-actions' }, [proceed]));
+                    review = core.el('details', { class: 'clop-confirm-review' }, [
+                        core.el('summary', {}, [options.reviewBeforeConfirm.summary]),
+                        reviewBody,
+                    ]);
+                    // A collapsed disclosure must never offer a hidden submit
+                    // target to keyboard navigation or programmatic clicks.
+                    proceed.disabled = true;
+                    review.addEventListener('toggle', () => { proceed.disabled = !review.open; });
+                    body.appendChild(review);
+                }
                 const panel = core.el('div', {
                     class: 'panel panel-default clop-confirm-panel',
                     role: 'alertdialog',
@@ -72,7 +92,8 @@ export const dialogsModule = {
                     ]),
                     body,
                     core.el('div', { class: 'panel-footer clop-confirm-actions' },
-                        alertOnly ? [cancel] : [cancel, proceed]),
+                        alertOnly || review ? [cancel]
+                            : dismissPrimary ? [proceed, cancel] : [cancel, proceed]),
                 ]);
                 const overlay = core.el('div', { class: 'clop-confirm-overlay' }, [panel]);
 
@@ -92,7 +113,9 @@ export const dialogsModule = {
                 }
 
                 function focusable() {
-                    return [...panel.querySelectorAll('button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])')];
+                    return [...panel.querySelectorAll('button:not([disabled]), summary, [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])')]
+                        .filter((node) => !review || review.open || !review.contains(node)
+                            || node === review.firstElementChild);
                 }
 
                 function onKey(event) {
@@ -117,7 +140,9 @@ export const dialogsModule = {
 
                 cancel.addEventListener('click', () => finish(false));
                 close.addEventListener('click', () => finish(false));
-                if (!alertOnly) proceed.addEventListener('click', () => finish(true));
+                if (!alertOnly) proceed.addEventListener('click', () => {
+                    if (!review || review.open) finish(true);
+                });
                 overlay.addEventListener('click', (event) => {
                     if (event.target === overlay) finish(false);
                 });

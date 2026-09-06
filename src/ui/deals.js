@@ -1,7 +1,8 @@
 import { incomingDealsFromDocument } from '../adapters/deals.js';
 import { fetchResourceStats } from '../adapters/overview.js';
-import { projectDealRisks } from '../lib/deal-safety.js';
+import { projectDealAffordability, projectDealRisks } from '../lib/deal-safety.js';
 import { upkeepWarningContent } from './upkeep-warning.js';
+import { affordabilityDialogOptions } from './affordability-warning.js';
 
 const SETTING_KEY = 'deals.confirmBelowUpkeep';
 
@@ -59,16 +60,17 @@ export const dealsModule = {
             HTMLFormElement.prototype.submit.call(record.form);
         }
 
-        function confirmRisks(risks) {
-            return core.confirm({
+        function confirmRisks(risks, affordability) {
+            return core.confirm(affordabilityDialogOptions(core, affordability, {
                 title: 'Upkeep reserve at risk',
+                warningCount: risks.length,
                 body: el('div', {}, [
                     ...upkeepWarningContent(
                         core, 'Accepting this deal would leave insufficient stock', risks),
                     el('p', {}, ['Accept this deal anyway?']),
                 ]),
                 confirmLabel: 'Accept anyway',
-            });
+            }, 'Deal was not accepted:'));
         }
 
         for (const record of deals) {
@@ -106,7 +108,9 @@ export const dealsModule = {
                     }
 
                     const risks = projectDealRisks(record, stats);
-                    if (!risks.length || await confirmRisks(risks)) submitAccept(record);
+                    const affordability = projectDealAffordability(record, stats);
+                    if ((!risks.length && !affordability.length)
+                        || await confirmRisks(risks, affordability)) submitAccept(record);
                 } finally {
                     setChecking(record, false);
                 }

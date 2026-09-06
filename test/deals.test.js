@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import { incomingDealFromForm } from '../src/adapters/deals.js';
-import { projectDealRisks } from '../src/lib/deal-safety.js';
+import { projectDealAffordability, projectDealRisks } from '../src/lib/deal-safety.js';
 import { dealsModule } from '../src/ui/deals.js';
 
 function cellsRow(name, amount) {
@@ -101,16 +101,40 @@ test('does not warn about a pre-existing shortage which the deal improves', () =
     assert.deepEqual(risks, []);
 });
 
-test('does not warn about a deal the server will reject before crediting offered items', () => {
-    const risks = projectDealRisks({
+test('checks deal affordability before crediting offered items and keeps hypothetical upkeep', () => {
+    const deal = {
         offered: [{ name: 'Cider', amount: 8 }],
         requested: [{ name: 'Cider', amount: 10 }],
-    }, {
+    };
+    const stats = {
         byName: {
             cider: { name: 'Cider', qty: 5, used: 10, mil: 0 },
         },
-    });
-    assert.deepEqual(risks, []);
+    };
+    assert.deepEqual(projectDealAffordability(deal, stats), [{
+        name: 'Cider', required: 10, stock: 5, shortage: 5,
+    }]);
+    const [risk] = projectDealRisks(deal, stats);
+    assert.equal(risk.stockAfter, 3);
+    assert.equal(risk.shortage, 7);
+});
+
+test('collects every known resource shortage in a deal without treating weapons as resources', () => {
+    assert.deepEqual(projectDealAffordability({ requested: [
+        { name: 'Copper', amount: 20 }, { name: 'Copper', amount: 30 },
+        { name: 'Apples', amount: 10 }, { name: 'Scrounged Weapons', amount: 100 },
+    ] }, { byName: {
+        copper: { qty: 35 }, apples: { qty: 0 },
+    } }), [
+        { name: 'Apples', required: 10, stock: 0, shortage: 10 },
+        { name: 'Copper', required: 50, stock: 35, shortage: 15 },
+    ]);
+});
+
+test('recognizes zero-stock resources omitted from Overview without guessing unknown deal items', () => {
+    assert.deepEqual(projectDealAffordability({ requested: [
+        { name: 'Copper', amount: 50 }, { name: 'Scrounged Weapons', amount: 10 },
+    ] }, { byName: {} }), [{ name: 'Copper', required: 50, stock: 0, shortage: 50 }]);
 });
 
 test('offers deal upkeep protection as a default-on setting', () => {

@@ -13,7 +13,7 @@ import {
     ACTION_CATALOG, BUILDING_EFFECTS, BUILDING_UPKEEP,
 } from '../src/data/actions.generated.js';
 import {
-    actionCompatibility, actionNeedsSafetyCheck, projectActionResourceRates,
+    actionCompatibility, actionNeedsSafetyCheck, projectActionAffordability, projectActionResourceRates,
     projectActionRisks, projectActionSatisfaction, SATISFACTION_SAFETY_MODES,
 } from '../src/lib/action-safety.js';
 import {
@@ -127,7 +127,7 @@ test('warns when an immediate action cost dips below the existing reserve', () =
     }]);
 });
 
-test('does not project negative inventory for an action the server will reject', () => {
+test('does not add an upkeep warning to an unaffordable burn with zero oil upkeep', () => {
     const risks = projectActionRisks({
         items: [{ name: 'Oil', isBuilding: false, consumed: true, amount: 5 }],
         output: null,
@@ -137,6 +137,60 @@ test('does not project negative inventory for an action the server will reject',
     }, {});
 
     assert.deepEqual(risks, []);
+});
+
+test('lists all missing action materials while projecting upkeep on negative resulting stock', () => {
+    const action = {
+        items: [
+            { name: 'Copper', amount: 25, consumed: true },
+            { name: 'Machinery', amount: 10, consumed: true },
+        ],
+        output: null,
+    };
+    const stats = { byName: {
+        copper: { name: 'Copper', qty: 35, used: 10 },
+        machinery: { name: 'Machinery', qty: 12, used: 0 },
+    } };
+    assert.deepEqual(projectActionAffordability(action, 2, stats), [
+        { name: 'Copper', required: 50, stock: 35, shortage: 15 },
+        { name: 'Machinery', required: 20, stock: 12, shortage: 8 },
+    ]);
+    const risks = projectActionRisks(action, 2, stats, {});
+    assert.equal(risks.length, 1);
+    assert.equal(risks[0].stockAfter, -15);
+    assert.equal(risks[0].shortage, 25);
+});
+
+test('affordability respects ownership limits and reusable prerequisites', () => {
+    const action = {
+        maxOwned: 5,
+        items: [
+            { name: 'Copper', amount: 50, consumed: true },
+            { name: 'Factory', amount: 1, isBuilding: true, consumed: false },
+        ],
+        output: { name: 'Limited Building', amount: 1, isBuilding: true },
+    };
+    const stats = { byName: { copper: { qty: 50 } }, buildingsByName: {
+        factory: { qty: 1, active: 0 }, 'limited building': { qty: 4 },
+    } };
+    assert.deepEqual(projectActionAffordability(action, 10, stats), []);
+    delete stats.buildingsByName['limited building'];
+    assert.deepEqual(projectActionAffordability(action, 10, stats), [
+        { name: 'Copper', required: 250, stock: 50, shortage: 200 },
+    ]);
+    stats.buildingsByName['limited building'] = { qty: 5 };
+    assert.deepEqual(projectActionAffordability(action, 10, stats), []);
+});
+
+test('action outputs cannot pay entry costs and absent known resources count as zero', () => {
+    const action = {
+        items: [{ name: 'Copper', amount: 50, consumed: true }],
+        output: { name: 'Copper', amount: 100 },
+    };
+    assert.deepEqual(projectActionAffordability(action, 1, { byName: {} }), [
+        { name: 'Copper', required: 50, stock: 0, shortage: 50 },
+    ]);
+    assert.deepEqual(projectActionAffordability(action, 1, null), []);
 });
 
 test('warns when new building upkeep exceeds stock left after construction', () => {
