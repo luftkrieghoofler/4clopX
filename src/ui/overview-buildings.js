@@ -33,6 +33,13 @@ export function bindOverviewBuildings(core, doc = document) {
             if (boundForms.has(form) || !form.querySelector('input[name="token_overview"]')
                 || !form.querySelector('input[name="resource_id"]')) continue;
             boundForms.add(form);
+            for (const { amount } of Object.values(OPERATIONS)) {
+                const input = form.querySelector(`input[name="${amount}"]`);
+                if (!input) continue;
+                input.placeholder = '1';
+                if (input.value === '1') input.value = '';
+                input.defaultValue = '';
+            }
             const destroy = form.querySelector('input[name="recycle"][type="submit"]');
             // Replace the stock browser confirm, but retain its live warning
             // about satisfaction rather than assuming old backend values.
@@ -61,6 +68,7 @@ export function bindOverviewBuildings(core, doc = document) {
                     // must not change the quantity the user agreed to destroy.
                     const params = new FormData(form);
                     params.set(submitter.name, oldLabel);
+                    if (!String(params.get(operation.amount) ?? '').trim()) params.set(operation.amount, '1');
                     const amount = phpInteger(params.get(operation.amount));
                     if (submitter.name === 'recycle') {
                         const name = form.closest('tr')?.querySelector('td')?.textContent.trim()

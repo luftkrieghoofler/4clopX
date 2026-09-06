@@ -1,5 +1,5 @@
 import {
-    actionsFromDocument, actionFormsFromDocument, phpInteger, submittedAction,
+    actionsFromDocument, actionFormsFromDocument, actionTimesValue, phpInteger, submittedAction,
 } from '../adapters/actions.js';
 import {
     formatTickDuration, tickIsCritical, tickIsImminent, tickSecondsFromDocument,
@@ -14,7 +14,9 @@ import { protectedReserve, reserveSafeMax } from '../lib/upkeep-safety.js';
 import { upkeepWarningSection } from './upkeep-warning.js';
 import { rateRiskListItem, warningGroup, warningSection } from './warning-content.js';
 import { affordabilityDialogOptions } from './affordability-warning.js';
-import { executeDynamicAction, isDynamicActionSubmission, replaceActionContent } from './action-submission.js';
+import {
+    executeDynamicAction, isDynamicActionSubmission, prepareActionQuantity, replaceActionContent,
+} from './action-submission.js';
 import { initialiseMasonry } from './page-content.js';
 
 const SETTING_KEY = 'actions.confirmUpkeepRisk';
@@ -221,7 +223,7 @@ export const actionsModule = {
             ]);
 
             function update() {
-                const times = phpInteger(input.value);
+                const times = phpInteger(actionTimesValue(record.form));
                 const total = times * BURN_OIL_UNITS_PER_ACTION;
                 if (!Number.isSafeInteger(times) || times < 1 || !Number.isSafeInteger(total)) {
                     totalLine.textContent = 'Enter a whole-number action quantity to see the total.';
@@ -241,7 +243,7 @@ export const actionsModule = {
             const row = input.closest('.form-inline');
             if (row) row.insertAdjacentElement('afterend', warning);
             else input.insertAdjacentElement('afterend', warning);
-            const initialValue = input.value;
+            const initialValue = actionTimesValue(record.form);
             let focused = false;
             let editedFromDefault = false;
 
@@ -252,7 +254,7 @@ export const actionsModule = {
 
             input.addEventListener('input', () => {
                 update();
-                if (focused && input.value !== initialValue) editedFromDefault = true;
+                if (focused && actionTimesValue(record.form) !== initialValue) editedFromDefault = true;
                 setVisible(focused || editedFromDefault);
             });
             input.addEventListener('focus', () => {
@@ -356,6 +358,8 @@ export const actionsModule = {
 
         async function submitForm(form, submitter) {
             if (!isDynamicActionSubmission(page, form, submitter)) {
+                const input = form.querySelector('[name="times"]');
+                if (input) input.value = actionTimesValue(form);
                 HTMLFormElement.prototype.submit.call(form);
                 return;
             }
@@ -562,6 +566,7 @@ export const actionsModule = {
             for (const record of forms) {
                 if (boundForms.has(record.form)) continue;
                 boundForms.add(record.form);
+                prepareActionQuantity(record.form);
                 let clickedSubmitter = null;
                 record.form.addEventListener('click', (event) => {
                     const submitter = event.target.closest('input[type="submit"], button[type="submit"]');

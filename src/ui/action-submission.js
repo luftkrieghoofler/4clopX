@@ -1,6 +1,14 @@
-import { actionFormsFromDocument } from '../adapters/actions.js';
+import { actionFormsFromDocument, actionTimesValue } from '../adapters/actions.js';
 import { replacePageContent } from './page-content.js';
 import { executeDynamicRequest } from './dynamic-request.js';
+
+export function prepareActionQuantity(form) {
+    const input = form.querySelector('input[name="times"][type="text"]');
+    if (!input) return;
+    input.placeholder = '1';
+    if (input.value === '1') input.value = '';
+    input.defaultValue = '';
+}
 
 export function replaceActionContent(currentDoc, sourceDoc) {
     const quantities = new Map();
@@ -44,6 +52,8 @@ export async function executeDynamicAction(core, { page, form, submitter, refres
     await executeDynamicRequest(core, {
         send: () => {
             const params = new FormData(form);
+            const times = actionTimesValue(form);
+            if (times !== undefined) params.set('times', times);
             if (submitter?.name) params.append(submitter.name, submitterValue);
             return core.http.postForm(form.getAttribute('action')
                 || (page === 'overview.php' ? 'favoriteactions.php' : page), params);

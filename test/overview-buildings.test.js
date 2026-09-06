@@ -12,6 +12,11 @@ function harness(t) {
             token_overview: token, resource_id: '5',
             recycleamount: '3', disableamount: '2', reenableamount: '1',
         };
+        const inputs = Object.fromEntries(Object.keys(fields).map((key) => [key, {
+            get value() { return fields[key]; },
+            set value(value) { fields[key] = value; },
+            placeholder: 'Amount', defaultValue: fields[key],
+        }]));
         const buttons = Object.fromEntries(['disable', 'reenable', 'recycle'].map((intent) => [intent, {
             name: intent,
             value: `${intent === 'recycle' ? 'Destroy' : intent} ${name}`,
@@ -20,14 +25,14 @@ function harness(t) {
             removeAttribute(key) { delete this[key]; },
         }]));
         const form = {
-            fields, buttons, listeners, classes,
+            fields, inputs, buttons, listeners, classes,
             classList: { add: (key) => classes.add(key), remove: (key) => classes.delete(key) },
             closest: () => ({ querySelector: () => ({ textContent: name }) }),
             addEventListener(name, handler) { assert.equal(listeners[name], undefined); listeners[name] = handler; },
             querySelector(selector) {
                 if (selector === 'input[name="recycle"][type="submit"]') return buttons.recycle;
                 const key = selector.match(/name="([^"]+)"/)?.[1];
-                return Object.hasOwn(fields, key) ? { value: fields[key] } : null;
+                return inputs[key] || null;
             },
         };
         for (const button of Object.values(buttons)) button.form = form;
@@ -168,4 +173,51 @@ test('failed building requests are not retried and release the busy state', asyn
     assert.equal(h.refreshes(), 0);
     assert.equal(form.classes.size, 0);
     assert.match(h.feedback[0].message, /Could not confirm whether.*Reload the page/);
+});
+
+test('all building quantities use a 1 placeholder initially and after refresh', (t) => {
+    const h = harness(t);
+    const form = h.makeForm();
+    form.fields.disableamount = '';
+    h.bind();
+    assert.equal(form.fields.reenableamount, '', 'the stock 1 is no longer prefilled');
+    assert.equal(form.fields.disableamount, '');
+    assert.equal(form.fields.recycleamount, '3', 'non-default quantities are preserved');
+    const fresh = h.makeForm('token-2');
+    h.events['overview:contentReplaced']();
+    for (const target of [form, fresh]) {
+        for (const key of ['disableamount', 'reenableamount', 'recycleamount']) {
+            assert.equal(target.inputs[key].placeholder, '1');
+            assert.equal(target.inputs[key].defaultValue, '');
+        }
+    }
+});
+
+test('blank building quantities submit one, while zero and other explicit values are retained', async (t) => {
+    const h = harness(t);
+    const form = h.makeForm();
+    h.bind();
+    for (const intent of ['disable', 'reenable', 'recycle']) {
+        const key = `${intent}amount`;
+        for (const [value, expected] of [['', '1'], ['  ', '1'], ['0', '0'], ['4', '4'], ['bad', 'bad']]) {
+            form.fields[key] = value;
+            await h.submit(form, intent);
+            assert.equal(h.posts.at(-1).params[key], expected);
+            assert.equal(form.fields[key], value, 'submission does not prefill the field');
+            if (intent === 'recycle') {
+                assert.equal(h.confirmations.at(-1).title, `Destroy Basic Factory × ${Number(expected) || 0}?`);
+            }
+        }
+    }
+});
+
+test('cancelling a blank-quantity destroy still sends nothing', async (t) => {
+    const h = harness(t);
+    const form = h.makeForm();
+    form.fields.recycleamount = '';
+    h.bind();
+    h.disallow();
+    await h.submit(form, 'recycle');
+    assert.equal(h.confirmations[0].title, 'Destroy Basic Factory × 1?');
+    assert.equal(h.posts.length, 0);
 });

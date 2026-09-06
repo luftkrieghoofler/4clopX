@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { executeDynamicAction, replaceActionContent } from '../src/ui/action-submission.js';
+import { executeDynamicAction, prepareActionQuantity, replaceActionContent } from '../src/ui/action-submission.js';
+import { actionTimesValue, submittedAction } from '../src/adapters/actions.js';
 import { replacePageContent } from '../src/ui/page-content.js';
 import { actionsModule } from '../src/ui/actions.js';
 
@@ -15,6 +16,7 @@ function form(page, token = 'fresh-token') {
         fields: { recipe_id: '5', times: '3',
             [page === 'actions.php' ? 'token_actions' : 'token_favoriteactions']: token },
         getAttribute: () => page,
+        querySelector: () => null,
     };
 }
 
@@ -61,6 +63,51 @@ test('posts the original submit intent once and refreshes before showing server 
         assert.equal(messages.length, 1);
         assert.equal(messages[0].doc, response);
         assert.equal(messages[0].options.successTitle, successTitle);
+    }
+});
+
+test('editable action quantities start empty with a 1 placeholder; presets are untouched', () => {
+    for (const [initial, expected] of [['1', ''], ['12', '12'], ['', ''], ['0', '0']]) {
+        const input = { value: initial, defaultValue: '1', placeholder: 'Times', type: 'text' };
+        prepareActionQuantity({ querySelector: () => input });
+        assert.equal(input.value, expected);
+        assert.equal(input.placeholder, '1');
+        assert.equal(input.defaultValue, '', 'form reset also returns to the blank default');
+    }
+    const preset = { value: '3', type: 'hidden' };
+    prepareActionQuantity({ querySelector: (selector) => selector.includes('[type="text"]') ? null : preset });
+    assert.equal(preset.value, '3');
+});
+
+test('safety and POST use the same blank default across all action pages, including Add Favorite', async (t) => {
+    formDataMock(t);
+    for (const page of ['actions.php', 'favoriteactions.php', 'overview.php']) {
+        for (const [value, type, expected] of [
+            ['', 'text', '1'], ['  ', 'text', '1'], ['0', 'text', '0'],
+            ['12', 'text', '12'], ['invalid', 'text', 'invalid'],
+            ['3', 'hidden', '3'], ['', 'hidden', ''],
+        ]) {
+            const input = { value, type };
+            const actionForm = {
+                ...form(page), fields: { times: value, recipe_id: '5' },
+                querySelector: (selector) => selector === '[name="times"]' ? input
+                    : selector === 'input[name="recipe_id"]' ? { value: '5' } : null,
+            };
+            assert.equal(actionTimesValue(actionForm), expected);
+            assert.equal(submittedAction(actionForm, null).times, Number(expected) || 0);
+            for (const intent of page === 'actions.php' ? ['', 'favorite'] : ['perform']) {
+                let sent;
+                const { feedback, messages } = feedbackHarness();
+                await executeDynamicAction({ feedback, http: { postForm: async (url, params) => {
+                    sent = params.get('times');
+                    return { querySelector: () => ({}) };
+                } } }, { page, form: actionForm,
+                    submitter: { name: intent, value: 'Submit', dataset: {} }, refresh: async () => {} });
+                assert.equal(sent, expected);
+                assert.equal(messages[0].options.additionalErrors, undefined);
+                assert.equal(input.value, value, 'submitting does not prefill the visible input');
+            }
+        }
     }
 });
 

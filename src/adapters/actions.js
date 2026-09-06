@@ -82,7 +82,14 @@ export function submittedAction(form, submitter) {
     // recipe.  Detect them by intent so embedded Favourite Actions (such as
     // those on overview.php) behave like the dedicated page.
     if (intent === 'favorite' || intent === 'remove') return null;
-    return { id, times: phpInteger(form.querySelector('[name="times"]')?.value) };
+    return { id, times: phpInteger(actionTimesValue(form)) };
+}
+
+// Placeholders are visual only. Use the same effective value when checking
+// safety, previewing Burn Oil, and constructing the actual POST.
+export function actionTimesValue(form) {
+    const input = form.querySelector('[name="times"]');
+    return input?.type === 'text' && !input.value.trim() ? '1' : input?.value;
 }
 
 // Match PHP's integer conversion closely enough to avoid underestimating a
