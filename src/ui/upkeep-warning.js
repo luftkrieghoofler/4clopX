@@ -1,5 +1,6 @@
 // Shared presentation for any operation which would leave resource stock
 // below the tick-consumption + military-upkeep reserve.
+import { warningSection } from './warning-content.js';
 
 export function upkeepRiskListItem(core, risk) {
     const el = core.el.bind(core);
@@ -35,14 +36,8 @@ export function upkeepRiskListItem(core, risk) {
     ]);
 }
 
-export function upkeepWarningContent(core, heading, risks) {
-    const el = core.el.bind(core);
-    return [
-        el('div', { class: 'alert alert-warning' }, [
-            el('strong', {}, [heading]),
-            ' for the protected upkeep reserve (tick consumption and military upkeep).',
-        ]),
-        el('ul', { class: 'clop-confirm-risk-list' },
-            risks.map((risk) => upkeepRiskListItem(core, risk))),
-    ];
+export function upkeepWarningSection(core, risks) {
+    return risks.length ? warningSection(core, 'Insufficient stock for next tick',
+        risks.map((risk) => upkeepRiskListItem(core, risk)),
+        'Includes tick consumption and military upkeep.') : null;
 }

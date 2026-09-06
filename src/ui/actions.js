@@ -12,7 +12,8 @@ import {
     projectActionRisks, projectActionSatisfaction, SATISFACTION_SAFETY_MODES,
 } from '../lib/action-safety.js';
 import { protectedReserve, reserveSafeMax } from '../lib/upkeep-safety.js';
-import { upkeepWarningContent } from './upkeep-warning.js';
+import { upkeepWarningSection } from './upkeep-warning.js';
+import { rateRiskListItem, warningGroup, warningSection } from './warning-content.js';
 import { affordabilityDialogOptions } from './affordability-warning.js';
 
 const SETTING_KEY = 'actions.confirmUpkeepRisk';
@@ -26,6 +27,32 @@ const BURN_OIL_ACTION_ID = '4';
 const BURN_OIL_UNITS_PER_ACTION = 5;
 const BURN_OIL_SAT_PER_ACTION = 5;
 const MAX_DISTRIBUTION_ACTION_IDS = new Set(['8', '9']);
+
+export function actionWarningGroup(core, {
+    resourceRateRisks = [], risks = [], satisfactionTrend = null, burnOilReminder = false,
+}) {
+    const sections = [];
+    if (resourceRateRisks.length) {
+        sections.push(warningSection(core, 'Domestic production deficit',
+            resourceRateRisks.map((risk) => rateRiskListItem(
+                core, risk.name, risk.netBefore, risk.netAfter))));
+    }
+    sections.push(upkeepWarningSection(core, risks));
+    if (satisfactionTrend) {
+        sections.push(warningSection(core, 'Satisfaction declining', [
+            rateRiskListItem(core, 'Satisfaction', satisfactionTrend.perTickBefore,
+                satisfactionTrend.perTickAfter,
+                satisfactionTrend.satisfactionMode === SATISFACTION_SAFETY_MODES.MAXIMUM
+                    ? 'at cap' : 'decay ignored'),
+        ]));
+    }
+    if (burnOilReminder) {
+        sections.push(warningSection(core, 'Remember: 1 action burns 5 oil', [
+            core.el('li', {}, ['Divide the oil you intend to burn by 5 before entering the action count.']),
+        ]));
+    }
+    return warningGroup(core, sections);
+}
 
 export function burnOilOutcome(times, satisfaction) {
     if (!Number.isSafeInteger(times) || times < 1 || !Number.isFinite(satisfaction)) return null;
@@ -407,9 +434,7 @@ export const actionsModule = {
                 ]),
             ]);
             const bodyChildren = Array.isArray(options.body) ? options.body : [options.body];
-            const body = el('div', {}, bodyChildren.length
-                ? [bodyChildren[0], imminent, critical, ...bodyChildren.slice(1)]
-                : [imminent, critical]);
+            const body = el('div', {}, [imminent, critical, ...bodyChildren]);
 
             function updateTickWarnings() {
                 const untilTick = tickSecondsFromDocument(document);
@@ -545,65 +570,17 @@ export const actionsModule = {
                 body.push(el('div', {
                     class: `alert alert-danger${collapse ? ' clop-action-collapse-risk' : ''}`,
                 }, summary));
-                if (burnOil) {
-                    body.push(el('div', { class: 'alert alert-warning' }, [
-                        '⚠ Remember: ', el('strong', {}, ['1 action burns 5 oil.']),
-                        ' Divide the oil you intend to burn by 5 before entering the action count.',
-                    ]));
-                }
-            } else if (satisfactionTrend) {
-                const heading = satisfactionProjection.perTickBefore >= 0
-                    ? 'This action would make satisfaction decrease each tick.'
-                    : 'This action would make the existing satisfaction decline worse.';
-                const rateLabel = satisfactionProjection.satisfactionMode
-                    === SATISFACTION_SAFETY_MODES.MAXIMUM
-                    ? 'Satisfaction/tick at cap:'
-                    : 'Satisfaction/tick (decay ignored):';
-                body.push(el('div', { class: 'alert alert-warning' }, [
-                    el('strong', { class: 'clop-action-satisfaction-title' }, [heading]),
-                    el('div', { class: 'clop-action-satisfaction-summary' }, [
-                        el('span', {}, [rateLabel]),
-                        el('span', {}, [
-                            el('strong', {}, [signed(satisfactionProjection.perTickBefore)]),
-                            ' → ', el('strong', {}, [signed(satisfactionProjection.perTickAfter)]),
-                        ]),
-                    ]),
-                ]));
             }
-            if (resourceRateRisks.length) {
-                const rateRows = [];
-                for (const risk of resourceRateRisks) {
-                    rateRows.push(
-                        el('span', {}, [`${risk.name}/tick:`]),
-                        el('span', {}, [
-                            el('strong', {}, [signed(risk.netBefore)]),
-                            ' → ', el('strong', {}, [signed(risk.netAfter)]),
-                        ]),
-                    );
-                }
-                body.push(el('div', { class: 'alert alert-warning' }, [
-                    el('strong', { class: 'clop-action-satisfaction-title' }, [
-                        'This action would create or worsen domestic resource deficits.',
-                    ]),
-                    el('div', { class: 'clop-action-satisfaction-summary' }, rateRows),
-                ]));
-            }
-            if (risks.length) {
-                body.push(...upkeepWarningContent(
-                    core, `${quantity} would leave insufficient stock`, risks));
-            }
-            let title = 'Upkeep reserve at risk';
-            if (hazard === 'collapse') title = 'Nation collapse risk';
-            else if (hazard === 'rebels') title = 'Rebel risk';
-            else {
-                const warningTypes = Number(satisfactionTrend)
-                    + Number(resourceRateRisks.length > 0) + Number(risks.length > 0);
-                if (warningTypes > 1) title = 'Action safety warning';
-                else if (satisfactionTrend) title = 'Satisfaction declining';
-                else if (resourceRateRisks.length) title = 'Resource production declining';
-            }
+            const ordinaryWarnings = actionWarningGroup(core, {
+                resourceRateRisks, risks,
+                satisfactionTrend: satisfactionTrend ? satisfactionProjection : null,
+                burnOilReminder: !!hazard && !!burnOil,
+            });
+            if (ordinaryWarnings) body.push(ordinaryWarnings);
+            body.push(el('p', {}, [burnOil ? 'Burn anyway?' : 'Perform this action anyway?']));
             return actionConfirm({
-                title,
+                title: `Review action: ${quantity}`,
+                operation: quantity,
                 body,
                 affordability,
                 warningCount: risks.length + resourceRateRisks.length

@@ -2,9 +2,13 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { dialogsModule } from '../src/ui/dialogs.js';
 import { affordabilityDialogOptions } from '../src/ui/affordability-warning.js';
-import { upkeepRiskListItem } from '../src/ui/upkeep-warning.js';
+import { upkeepWarningSection } from '../src/ui/upkeep-warning.js';
 import { upkeepRiskForChange } from '../src/lib/upkeep-safety.js';
 import { feedbackModule } from '../src/ui/feedback.js';
+import { actionWarningGroup } from '../src/ui/actions.js';
+import { saleWarningGroup } from '../src/ui/marketplace.js';
+import { warningGroup } from '../src/ui/warning-content.js';
+import { SATISFACTION_SAFETY_MODES } from '../src/lib/action-safety.js';
 
 // Minimal DOM for exercising the real dialog event/Promise lifecycle without
 // a browser dependency. Native details layout and styling need browser review.
@@ -55,6 +59,69 @@ function dialogHarness(t) {
 }
 
 const shortages = [{ name: 'Copper', required: 50, stock: 35, shortage: 15 }];
+
+test('action warnings share one yellow box in deficit, stock, satisfaction order', (t) => {
+    const { core, nodes } = dialogHarness(t);
+    const stockRisk = upkeepRiskForChange({ name: 'Cider', qty: 24, used: 12 }, { reserveChange: 15 });
+    const group = actionWarningGroup(core, {
+        resourceRateRisks: [{ name: 'Cider', netBefore: 3, netAfter: -12 }],
+        risks: [stockRisk],
+        satisfactionTrend: { perTickBefore: 2, perTickAfter: -4 },
+    });
+    assert.equal(group.attrs.class, 'alert alert-warning');
+    assert.deepEqual(group.children.map((section) => section.firstElementChild.textContent), [
+        'Domestic production deficit', 'Insufficient stock for next tick', 'Satisfaction declining',
+    ]);
+    assert.equal(nodes.filter((node) => node.attrs.class === 'alert alert-warning').length, 1);
+    assert.match(group.textContent, /Cider: net\/tick decreases from \+3 to -12/);
+    assert.match(group.textContent, /consumption increases from 12 to 27; current stock is 24 — short by 3 for next tick/);
+    assert.match(group.textContent, /Satisfaction: net\/tick decreases from \+2 to -4 \(decay ignored\)/);
+    for (const section of group.children) {
+        assert.equal(section.children.at(-1).tag, 'ul', 'details stay inside their warning section');
+    }
+    assert.equal(actionWarningGroup(core, {}), null, 'no empty yellow box');
+    const atCap = actionWarningGroup(core, {
+        satisfactionTrend: { perTickBefore: -1, perTickAfter: -4,
+            satisfactionMode: SATISFACTION_SAFETY_MODES.MAXIMUM },
+    });
+    assert.match(atCap.textContent, /from -1 to -4 \(at cap\)/);
+    const oil = actionWarningGroup(core, { burnOilReminder: true });
+    assert.equal(oil.children.length, 1);
+    assert.match(oil.textContent, /Remember: 1 action burns 5 oil/);
+});
+
+test('market sales and deals reuse the same stock section, including single-warning cases', (t) => {
+    const { core } = dialogHarness(t);
+    const upkeep = upkeepRiskForChange({ name: 'Oil', qty: 35, used: 10 }, { stockChange: -30 });
+    const deal = warningGroup(core, [upkeepWarningSection(core, [upkeep])]);
+    const sale = saleWarningGroup(core, 'Oil', { upkeep });
+    assert.equal(sale.textContent, deal.textContent);
+    for (const kind of ['imported', 'shrinking']) {
+        const group = saleWarningGroup(core, 'Oil', { upkeep, negativeNet: { kind, net: -10 } });
+        assert.equal(group.attrs.class, 'alert alert-warning');
+        assert.equal(group.children.length, 2);
+        assert.equal(group.children[1].textContent, deal.children[0].textContent);
+        assert.match(group.children[0].textContent, kind === 'imported'
+            ? /Selling imported stockOil: your nation does not produce this resource/
+            : /Selling a shrinking stockpileOil: net production is -10\/tick/);
+    }
+    const importedOnly = saleWarningGroup(core, 'Oil', { negativeNet: { kind: 'imported', net: -10 } });
+    assert.equal(importedOnly.children.length, 1);
+    assert.equal(saleWarningGroup(core, 'Oil', {}), null);
+});
+
+test('affordability puts the operation in the title and shortages inside a red box', (t) => {
+    const { core } = dialogHarness(t);
+    for (const operation of ['Build Bars × 3', 'Sell 340 Oil', 'Accept deal']) {
+        const options = affordabilityDialogOptions(core, shortages, { operation });
+        assert.equal(options.title, `Action was not performed: ${operation}`);
+        assert.equal(options.body[0].attrs.class, 'alert alert-danger');
+        const section = options.body[0].firstElementChild;
+        assert.equal(section.firstElementChild.textContent, 'Not enough resources');
+        assert.match(section.textContent, /Copper: need 50, stock 35 — short by 15/);
+        assert.equal(options.body[1].textContent, 'The action was not sent to the server.');
+    }
+});
 
 test('dialog headers identify script confirmations and game responses without changing titles', async (t) => {
     const { core, nodes } = dialogHarness(t);
@@ -112,10 +179,10 @@ test('reviewing warnings never submits and the revealed button completes one con
     let settled = false;
     let opened = 0;
     let cleaned = 0;
-    const warning = upkeepRiskListItem(core, upkeepRiskForChange(
-        { name: 'Copper', qty: 35, used: 10 }, { stockChange: -50 }));
+    const warning = warningGroup(core, [upkeepWarningSection(core, [upkeepRiskForChange(
+        { name: 'Copper', qty: 35, used: 10 }, { stockChange: -50 })])]);
     const result = core.confirm(affordabilityDialogOptions(core, shortages, {
-        body: core.el('ul', {}, [warning]),
+        body: warning,
         warningCount: 1,
         onOpen() { opened += 1; return () => { cleaned += 1; }; },
     })).then((value) => { settled = true; return value; });
@@ -126,6 +193,8 @@ test('reviewing warnings never submits and the revealed button completes one con
     assert.equal(review.open, false);
     assert.equal(proceed.disabled, true);
     assert.equal(review.contains(proceed), true);
+    assert.equal(review.contains(warning), true);
+    assert.equal(warning.attrs.class, 'alert alert-warning');
     assert.match(review.textContent, /stock decreases from 35 to -15; current consumption is 10 — short by 25/);
     proceed.click();
     await Promise.resolve();

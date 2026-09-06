@@ -30,6 +30,11 @@ export const dialogsModule = {
             .clop-confirm-actions .btn + .btn { margin-left: 6px; }
             .clop-confirm-risk-list { margin: 10px 0 0; padding-left: 22px; }
             .clop-confirm-risk-list + p { margin-top: 12px; }
+            .clop-warning-section + .clop-warning-section { margin-top: 14px; }
+            .clop-warning-heading { display: block; }
+            .clop-warning-section .clop-confirm-risk-list { margin: 6px 0 0; }
+            .clop-warning-section li + li { margin-top: 4px; }
+            .clop-warning-description { margin-top: 3px; }
             .clop-confirm-review { margin-top: 14px; }
             .clop-confirm-review > summary { display: list-item; cursor: pointer; list-style: disclosure-closed inside; }
             .clop-confirm-review[open] > summary { list-style-type: disclosure-open; }

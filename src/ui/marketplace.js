@@ -24,7 +24,8 @@ import {
 import {
     affordabilityShortage, protectedReserve, reserveSafeMax, upkeepRiskForChange,
 } from '../lib/upkeep-safety.js';
-import { upkeepRiskListItem } from './upkeep-warning.js';
+import { upkeepWarningSection } from './upkeep-warning.js';
+import { warningGroup, warningSection } from './warning-content.js';
 import { affordabilityDialogOptions } from './affordability-warning.js';
 
 const SIDES = [
@@ -56,11 +57,10 @@ export function marketPurchaseShortage(snapshot, quantity, price) {
 
 // Used by buy offers and every listing-purchase button. Returning null means
 // the user dismissed the preflight; the caller should preserve their input.
-export async function performMarketPurchase(core, adapter, amount, price, action) {
+export async function performMarketPurchase(core, adapter, amount, price, action, operation = 'Buy items') {
     const snapshot = await adapter.inspect();
     const shortage = marketPurchaseShortage(snapshot, Number(amount), Number(price));
-    if (shortage && !(await core.confirm(affordabilityDialogOptions(core, [shortage], {},
-        'Purchase was not performed:')))) return null;
+    if (shortage && !(await core.confirm(affordabilityDialogOptions(core, [shortage], { operation })))) return null;
     return action();
 }
 
@@ -101,6 +101,24 @@ export function saleResourceRisks(resource, name, amount, {
             ? { kind: generated > 0 ? 'shrinking' : 'imported', net }
             : null,
     };
+}
+
+export function saleWarningGroup(core, name, risks) {
+    const el = core.el.bind(core);
+    const sections = [];
+    if (risks.negativeNet) {
+        const detail = risks.negativeNet.kind === 'imported'
+            ? ['your nation does not produce this resource. Check that you intend to sell your imported stockpile.']
+            : ['net production is ',
+                el('strong', {}, [`${core.commas(risks.negativeNet.net)}/tick`]),
+                '. Check that you intend to sell a stockpile that is already shrinking.'];
+        sections.push(warningSection(core, risks.negativeNet.kind === 'imported'
+            ? 'Selling imported stock' : 'Selling a shrinking stockpile', [
+            el('li', {}, [el('strong', {}, [`${name}:`]), ' ', ...detail]),
+        ]));
+    }
+    sections.push(upkeepWarningSection(core, risks.upkeep ? [risks.upkeep] : []));
+    return warningGroup(core, sections);
 }
 
 export const marketplaceModule = {
@@ -438,7 +456,9 @@ export const marketplaceModule = {
         const load = (resourceId) => run(() => adapter().load(resourceId));
 
         function checkedPurchase(amount, price, action) {
-            return run(() => performMarketPurchase(core, adapter(), amount, price, action));
+            const verb = state.side === 'buyer' ? 'Place buy order for' : 'Buy';
+            const operation = `${verb} ${core.commas(amount)} ${resourceName(state.activeId)}`;
+            return run(() => performMarketPurchase(core, adapter(), amount, price, action, operation));
         }
 
         // Fresh data on market page load / Refresh / side switch: reload
@@ -494,49 +514,19 @@ export const marketplaceModule = {
             const shortage = affordabilityShortage(fresh, Number(amount), name);
             if (!shortage && !risks.upkeep && !risks.negativeNet) return true;
 
-            const actionText = `${verb} ${core.commas(amount)} ${name}`;
-            const gerund = verb === 'List' ? 'Listing' : 'Selling';
-            const both = !!risks.upkeep && !!risks.negativeNet;
-            const title = both
-                ? 'Resource sale warnings'
-                : risks.upkeep
-                    ? 'Upkeep reserve at risk'
-                    : risks.negativeNet?.kind === 'imported'
-                        ? 'Imported stockpile warning'
-                        : 'Shrinking stockpile warning';
-            const heading = both
-                ? [`${gerund} has `, el('strong', {}, ['two resource warnings']), '.']
-                : risks.upkeep
-                    ? [el('strong', {}, [`${gerund} would leave insufficient stock`]),
-                        ' for the protected upkeep reserve (tick consumption and military upkeep).']
-                    : [el('strong', {}, [risks.negativeNet?.kind === 'imported'
-                        ? 'Selling off an imported stockpile.'
-                        : 'Selling a stockpile with negative net production.'])];
-            const items = [];
-            if (risks.upkeep) items.push(upkeepRiskListItem(core, risks.upkeep));
-            if (risks.negativeNet) {
-                const detail = risks.negativeNet.kind === 'imported'
-                    ? 'your nation does not produce this resource; make sure you actually intend to sell your imported stockpile.'
-                    : ['your net production is ',
-                        el('strong', {}, [`${core.commas(risks.negativeNet.net)}/tick`]),
-                        '; make sure you actually intend to sell a stockpile that is already shrinking.'];
-                items.push(el('li', {}, [
-                    el('strong', {}, [`${name}:`]),
-                    ' ',
-                    ...(Array.isArray(detail) ? detail : [detail]),
-                ]));
-            }
+            const actionText = `${verb} ${core.commas(amount)} ${name}${verb === 'List' ? ' for sale' : ''}`;
+            const warnings = saleWarningGroup(core, name, risks);
 
             return core.confirm(affordabilityDialogOptions(core, shortage ? [shortage] : [], {
-                title,
-                warningCount: items.length,
+                title: `Review action: ${actionText}`,
+                operation: actionText,
+                warningCount: Number(!!risks.upkeep) + Number(!!risks.negativeNet),
                 body: el('div', {}, [
-                    el('div', { class: 'alert alert-warning' }, heading),
-                    el('ul', { class: 'clop-confirm-risk-list' }, items),
-                    el('p', {}, [`${actionText} anyway?`]),
+                    ...(warnings ? [warnings] : []),
+                    el('p', {}, [`${verb} anyway?`]),
                 ]),
                 confirmLabel: `${verb} anyway`,
-            }, verb === 'List' ? 'Order was not listed:' : 'Sale was not performed:'));
+            }));
         }
 
         // Refresh once before checking affordability and the enabled sale
@@ -555,8 +545,9 @@ export const marketplaceModule = {
                         const snapshot = await adapter().inspect();
                         const item = snapshot.resources.find((resource) => resource.id === resourceId);
                         const shortage = affordabilityShortage(item ? { qty: item.have } : null, Number(amount), name);
-                        if (shortage && !(await core.confirm(affordabilityDialogOptions(core, [shortage], {},
-                            verb === 'List' ? 'Order was not listed:' : 'Sale was not performed:')))) {
+                        if (shortage && !(await core.confirm(affordabilityDialogOptions(core, [shortage], {
+                            operation: `${verb} ${core.commas(amount)} ${name}${verb === 'List' ? ' for sale' : ''}`,
+                        })))) {
                             cancelled = true;
                             return;
                         }

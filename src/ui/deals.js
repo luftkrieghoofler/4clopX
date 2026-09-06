@@ -1,7 +1,8 @@
 import { incomingDealsFromDocument } from '../adapters/deals.js';
 import { fetchResourceStats } from '../adapters/overview.js';
 import { projectDealAffordability, projectDealRisks } from '../lib/deal-safety.js';
-import { upkeepWarningContent } from './upkeep-warning.js';
+import { upkeepWarningSection } from './upkeep-warning.js';
+import { warningGroup } from './warning-content.js';
 import { affordabilityDialogOptions } from './affordability-warning.js';
 
 const SETTING_KEY = 'deals.confirmBelowUpkeep';
@@ -61,16 +62,17 @@ export const dealsModule = {
         }
 
         function confirmRisks(risks, affordability) {
+            const warnings = warningGroup(core, [upkeepWarningSection(core, risks)]);
             return core.confirm(affordabilityDialogOptions(core, affordability, {
-                title: 'Upkeep reserve at risk',
+                title: 'Review action: Accept deal',
+                operation: 'Accept deal',
                 warningCount: risks.length,
                 body: el('div', {}, [
-                    ...upkeepWarningContent(
-                        core, 'Accepting this deal would leave insufficient stock', risks),
+                    ...(warnings ? [warnings] : []),
                     el('p', {}, ['Accept this deal anyway?']),
                 ]),
                 confirmLabel: 'Accept anyway',
-            }, 'Deal was not accepted:'));
+            }));
         }
 
         for (const record of deals) {
