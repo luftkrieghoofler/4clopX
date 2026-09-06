@@ -56,6 +56,7 @@ export function effectiveActionTimes(action, times, stats) {
 
 export function actionNeedsSafetyCheck(action, buildingUpkeep, buildingEffects = {}) {
     if (!action) return false;
+    if (Number(action.bitsCost) > 0) return true;
     if (action.items.length) return true;
     if (Number(action.satisfaction) < 0) return true;
     return !!(action.output && action.output.isBuilding && (
@@ -75,6 +76,9 @@ export function projectActionAffordability(action, times, stats) {
         requirements.set(key, { ...item, required: (previous ? previous.required : 0) + required });
     }
     const shortages = [];
+    const bitsShortage = affordabilityShortage(
+        { qty: stats && stats.funds }, action.bitsCost * times, 'Bits');
+    if (bitsShortage) shortages.push(bitsShortage);
     for (const item of requirements.values()) {
         const collection = item.isBuilding ? 'buildingsByName' : 'byName';
         const current = keyed(stats, collection, item.name)

@@ -22,9 +22,14 @@ export function projectDealAffordability(deal, stats) {
     const requested = new Map();
     for (const item of deal.requested || []) add(requested, item.name, item.amount);
     const shortages = [];
+    const bits = affordabilityShortage({ qty: stats.funds }, deal.bitsRequested, 'Bits');
+    if (bits) shortages.push(bits);
     for (const [key, item] of requested) {
         // Offered items are credited after the server validates the request.
-        const current = stats.byName[key] || (knownResourceNames.has(key) ? { qty: 0 } : null);
+        const current = stats.byName[key] || stats.weaponsByName?.[key] || stats.armorByName?.[key]
+            // With complete inventory tables, an absent requested item is
+            // unowned. Without them, only known resource names imply zero.
+            || (knownResourceNames.has(key) || (stats.weaponsByName && stats.armorByName) ? { qty: 0 } : null);
         const shortage = affordabilityShortage(current, item.amount, item.name);
         if (shortage) shortages.push(shortage);
     }

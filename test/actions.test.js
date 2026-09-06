@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { phpInteger, submittedAction } from '../src/adapters/actions.js';
+import { actionBitsCost, actionsFromDocument, phpInteger, submittedAction } from '../src/adapters/actions.js';
 import {
     formatTickDuration, tickIsCritical, tickIsImminent,
     tickSecondsFromDocument, tickSecondsFromText,
@@ -191,6 +191,67 @@ test('action outputs cannot pay entry costs and absent known resources count as 
         { name: 'Copper', required: 50, stock: 0, shortage: 50 },
     ]);
     assert.deepEqual(projectActionAffordability(action, 1, null), []);
+});
+
+test('reads the live bits cost separately from numbers in the action description', () => {
+    function formWithCost(cost) {
+        const form = {
+            closest: () => ({ childNodes: [
+                { nodeType: 3, textContent: 'Costs 50 copper and originally cost 300,000 bits.' },
+                { nodeType: 1, tagName: 'BR' },
+                { nodeType: 1, tagName: 'SPAN', textContent: cost },
+                { nodeType: 3, textContent: ' bits\n' },
+                { nodeType: 1, tagName: 'BR' },
+                form,
+            ] }),
+            querySelector: (selector) => selector === 'input[name="recipe_id"]' ? { value: '5' } : {},
+            querySelectorAll: () => [{ name: '', value: 'Build Basic Factory' }],
+        };
+        return form;
+    }
+    const form = formWithCost(' 1,200,000 ');
+    const actions = actionsFromDocument({ querySelectorAll: () => [form] });
+    assert.equal(actions.get('5').bitsCost, 1200000);
+    assert.match(actions.get('5').description, /300,000 bits/);
+    assert.equal(actionBitsCost(formWithCost('0')), 0);
+    assert.equal(actionBitsCost(formWithCost('-20,000')), -20000);
+    assert.equal(actionBitsCost(formWithCost('unknown')), null);
+    assert.equal(actionBitsCost(formWithCost('1,20,000')), null);
+    assert.equal(actionBitsCost({ closest: () => null }), null);
+});
+
+test('checks bits-only actions and includes missing bits alongside missing materials', () => {
+    const action = { items: [], output: null, bitsCost: 100000 };
+    assert.equal(actionNeedsSafetyCheck(action, {}, {}), true);
+    assert.deepEqual(projectActionAffordability(action, 3, { funds: 250000 }), [
+        { name: 'Bits', required: 300000, stock: 250000, shortage: 50000 },
+    ]);
+    assert.deepEqual(projectActionRisks(action, 3, { funds: 250000 }, {}), [],
+        'bits have no upkeep warning');
+    assert.deepEqual(projectActionAffordability(action, 3, { funds: 300000 }), []);
+    assert.deepEqual(projectActionAffordability(action, 1, { funds: null }), []);
+    assert.deepEqual(projectActionAffordability(action, 1, {}), []);
+    assert.deepEqual(projectActionAffordability({ ...action, bitsCost: -20000 }, 3, { funds: 0 }), []);
+    assert.deepEqual(projectActionAffordability({ ...action, bitsCost: null }, 3, { funds: 0 }), []);
+
+    action.items = [{ name: 'Copper', amount: 50, consumed: true }];
+    assert.deepEqual(projectActionAffordability(action, 1, {
+        funds: 90000, byName: { copper: { qty: 35 } },
+    }), [
+        { name: 'Bits', required: 100000, stock: 90000, shortage: 10000 },
+        { name: 'Copper', required: 50, stock: 35, shortage: 15 },
+    ]);
+});
+
+test('caps bits costs to the effective build count for limited buildings', () => {
+    const action = {
+        items: [], bitsCost: 100000, maxOwned: 5,
+        output: { name: 'Limited Building', isBuilding: true, amount: 1 },
+    };
+    const stats = { funds: 90000, buildingsByName: { 'limited building': { qty: 4 } } };
+    assert.deepEqual(projectActionAffordability(action, 100, stats), [
+        { name: 'Bits', required: 100000, stock: 90000, shortage: 10000 },
+    ]);
 });
 
 test('warns when new building upkeep exceeds stock left after construction', () => {
@@ -591,7 +652,7 @@ test('includes positive immediate and per-tick satisfaction from a building acti
     assert.equal(projection.hazard, null);
 });
 
-test('reads government and satisfaction rates from the Overview Nation panel', () => {
+test('reads funds, government and satisfaction rates from the Overview Nation panel', () => {
     const governmentRow = {
         querySelectorAll: () => [
             { textContent: 'Government Type' },
@@ -604,19 +665,27 @@ test('reads government and satisfaction rates from the Overview Nation panel', (
             { textContent: '1,234 (-5 per tick)' },
         ],
     };
+    const fundsCell = { textContent: '1,234,567 bits' };
+    const fundsRow = { querySelectorAll: () => [{ textContent: 'Funds' }, fundsCell] };
     const panel = {
         querySelector: () => ({ textContent: 'Nation' }),
-        querySelectorAll: () => [governmentRow, satisfactionRow],
+        querySelectorAll: () => [governmentRow, satisfactionRow, fundsRow],
     };
     const doc = {
         querySelectorAll: () => [panel],
     };
     assert.deepEqual(nationStatusFromDocument(doc), {
+        funds: 1234567,
         government: 'Loose Despotism',
         satisfaction: 1234,
         satisfactionPerTick: -5,
     });
     assert.equal(nationSatisfactionFromDocument(doc), 1234);
+    fundsCell.textContent = '0 bits';
+    assert.equal(nationStatusFromDocument(doc).funds, 0);
+    fundsCell.textContent = 'unknown bits';
+    assert.equal(nationStatusFromDocument(doc).funds, null);
+    assert.equal(nationStatusFromDocument({ querySelectorAll: () => [] }).funds, null);
 });
 
 test('reads domestic production from the Overview Resources table', () => {

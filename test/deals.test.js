@@ -52,6 +52,47 @@ test('associates offered and requested resource tables with an incoming deal for
     assert.deepEqual(deal.requested, [{ name: 'Copper', amount: 350 }]);
 });
 
+test('reads the requested bits for each incoming deal, including money-only deals', () => {
+    const previousForm = node('form', {});
+    const moneyLine = node('money');
+    moneyLine.previousElementSibling = previousForm;
+    const form = node('form', { accept: { name: 'acceptdeal' }, dealId: { value: '42' } });
+    form.previousElementSibling = moneyLine;
+    moneyLine.textContent = 'requests 1,200,000 bits from you for this deal';
+    assert.equal(incomingDealFromForm(form).bitsRequested, 1200000);
+    moneyLine.textContent = 'offers 1,200,000 bits for this deal';
+    assert.equal(incomingDealFromForm(form).bitsRequested, 0);
+    moneyLine.textContent = 'does not involve money in this deal';
+    assert.equal(incomingDealFromForm(form).bitsRequested, 0);
+    moneyLine.textContent = 'Unrecognized money format';
+    assert.equal(incomingDealFromForm(form).bitsRequested, null);
+});
+
+test('deal affordability combines money, resource, weapon and armor shortages', () => {
+    const stats = {
+        funds: 100, byName: { copper: { qty: 5 } },
+        weaponsByName: { 'scrounged weapons': { qty: 2 } },
+        armorByName: { 'scrounged armor': { qty: 1 } },
+    };
+    const deal = { bitsRequested: 200, requested: [
+        { name: 'Copper', amount: 10 },
+        { name: 'Scrounged Weapons', amount: 3 },
+        { name: 'Scrounged Armor', amount: 3 },
+    ] };
+    assert.deepEqual(projectDealAffordability(deal, stats), [
+        { name: 'Bits', required: 200, stock: 100, shortage: 100 },
+        { name: 'Copper', required: 10, stock: 5, shortage: 5 },
+        { name: 'Scrounged Armor', required: 3, stock: 1, shortage: 2 },
+        { name: 'Scrounged Weapons', required: 3, stock: 2, shortage: 1 },
+    ]);
+    assert.deepEqual(projectDealAffordability({ bitsRequested: 100 }, stats), []);
+    assert.deepEqual(projectDealAffordability({ bitsRequested: 0 }, stats), []);
+    assert.deepEqual(projectDealAffordability({ bitsRequested: 200 }, { ...stats, funds: null }), []);
+    assert.deepEqual(projectDealAffordability({ requested: [{ name: 'Scrounged Weapons', amount: 3 }] }, {
+        byName: {}, weaponsByName: {}, armorByName: {},
+    }), [{ name: 'Scrounged Weapons', required: 3, stock: 0, shortage: 3 }]);
+});
+
 test('warns when accepting a deal would spend stock below its reserve', () => {
     const risks = projectDealRisks({
         offered: [],

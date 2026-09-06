@@ -82,8 +82,7 @@ export const dealsModule = {
             record.form.addEventListener('submit', async (event) => {
                 const submitter = event.submitter || clickedSubmitter;
                 clickedSubmitter = null;
-                if (!submitter || submitter.name !== 'acceptdeal'
-                    || !core.settings.get(SETTING_KEY)) return;
+                if (!submitter || submitter.name !== 'acceptdeal') return;
 
                 event.preventDefault();
                 if (record.form.classList.contains('clop-deal-checking')) return;
@@ -97,17 +96,17 @@ export const dealsModule = {
                             title: 'Deal safety unavailable',
                             body: el('div', {}, [
                                 el('div', { class: 'alert alert-danger' }, [
-                                    `4clopX could not load your current stock and upkeep ` +
+                                    `4clopX could not load your current funds, inventory and upkeep ` +
                                     `(${String(error.message || error)}).`,
                                 ]),
-                                el('p', {}, ['Accept this deal without upkeep protection?']),
+                                el('p', {}, ['Accept this deal without safety checks?']),
                             ]),
                             confirmLabel: 'Accept without protection',
                         })) submitAccept(record);
                         return;
                     }
 
-                    const risks = projectDealRisks(record, stats);
+                    const risks = core.settings.get(SETTING_KEY) ? projectDealRisks(record, stats) : [];
                     const affordability = projectDealAffordability(record, stats);
                     if ((!risks.length && !affordability.length)
                         || await confirmRisks(risks, affordability)) submitAccept(record);

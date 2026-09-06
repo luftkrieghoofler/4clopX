@@ -283,6 +283,13 @@ export function createMarketAdapter(core, kind, mode, seedDoc = null) {
         mode,
         ready,
 
+        // GET provides current funds, taxes and inventory without performing
+        // an operation or rotating the market's single-use token.
+        async inspect() {
+            const doc = absorbToken(await core.http.getDoc(marketPageUrl(kind, mode)));
+            return snapshot(doc, marketMessagesFromDocument(doc));
+        },
+
         // Absorb the token from an already-rendered page (the one hosting
         // the UI), saving the GET that ready() would otherwise make.
         seed(doc) {

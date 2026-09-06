@@ -39,6 +39,31 @@ export function sellRevenueAfterTax(quantity, unitPrice, sellMultiplier) {
     return Math.floor(unitPrice * quantity * sellMultiplier);
 }
 
+// Both buying listings and creating buy offers pay this full tax-inclusive
+// amount immediately. The latter is escrowed, not paid when the order fills.
+export function marketPurchaseShortage(snapshot, quantity, price) {
+    const fundsText = String(snapshot.funds ?? '').trim();
+    const match = fundsText.match(/^([+-]?(?:\d{1,3}(?:,\d{3})+|\d+))(?:\s+bits)?$/i);
+    const funds = match ? Number(match[1].replace(/,/g, '')) : NaN;
+    const multiplier = snapshot.mult?.buy;
+    const cost = Math.floor(price * quantity * multiplier);
+    if (![funds, quantity, price, cost].every(Number.isSafeInteger)
+        || quantity < 1 || price < 1 || !Number.isFinite(multiplier) || multiplier <= 0) {
+        throw new Error('Could not calculate the current purchase cost or funds safely.');
+    }
+    return affordabilityShortage({ qty: funds }, cost, 'Bits');
+}
+
+// Used by buy offers and every listing-purchase button. Returning null means
+// the user dismissed the preflight; the caller should preserve their input.
+export async function performMarketPurchase(core, adapter, amount, price, action) {
+    const snapshot = await adapter.inspect();
+    const shortage = marketPurchaseShortage(snapshot, Number(amount), Number(price));
+    if (shortage && !(await core.confirm(affordabilityDialogOptions(core, [shortage], {},
+        'Purchase was not performed:')))) return null;
+    return action();
+}
+
 // Lowest whole-number unit price whose after-tax return meets the target.
 // The one-step adjustments guard the division against floating-point edges.
 export function unitPriceForSellRevenue(quantity, targetRevenue, sellMultiplier) {
@@ -383,14 +408,21 @@ export const marketplaceModule = {
             if (state.busy) return;
             setBusy(true);
             let fullRender = !auto;
+            let cancelled = false;
             try {
-                merge(await action());
+                const snapshot = await action();
+                if (!snapshot) {
+                    cancelled = true;
+                    return;
+                }
+                merge(snapshot);
             } catch (e) {
                 showMarketError(e);
                 fullRender = true;
             } finally {
                 setBusy(false);
-                if (fullRender) render();
+                if (cancelled) updateMaxUi();
+                else if (fullRender) render();
                 else refreshOrdersView();
                 if (pendingLinkedId && pendingLinkedId !== state.activeId) {
                     const requested = pendingLinkedId;
@@ -404,6 +436,10 @@ export const marketplaceModule = {
         }
 
         const load = (resourceId) => run(() => adapter().load(resourceId));
+
+        function checkedPurchase(amount, price, action) {
+            return run(() => performMarketPurchase(core, adapter(), amount, price, action));
+        }
 
         // Fresh data on market page load / Refresh / side switch: reload
         // the open market, then ask the live-update engine (ui/liveupdates.js)
@@ -509,13 +545,24 @@ export const marketplaceModule = {
             const checkNet = negativeNetConfirmationEnabled(
                 core.settings.get(NEGATIVE_NET_CONFIRM_KEY), isMax);
             const checkUpkeep = core.settings.get('market.belowUpkeepSellConfirm');
-            if (mode || (!checkNet && !checkUpkeep)) return run(action);
             if (state.busy) return Promise.resolve();
             setBusy(true);
             let cancelled = false;
             return (async () => {
                 try {
                     const name = resourceName(resourceId);
+                    if (mode) {
+                        const snapshot = await adapter().inspect();
+                        const item = snapshot.resources.find((resource) => resource.id === resourceId);
+                        const shortage = affordabilityShortage(item ? { qty: item.have } : null, Number(amount), name);
+                        if (shortage && !(await core.confirm(affordabilityDialogOptions(core, [shortage], {},
+                            verb === 'List' ? 'Order was not listed:' : 'Sale was not performed:')))) {
+                            cancelled = true;
+                            return;
+                        }
+                        merge(await action());
+                        return;
+                    }
                     const stats = await fetchResourceStats(core);
                     state.upkeep = stats;
                     // A known market resource absent from Overview has no
@@ -1105,7 +1152,8 @@ export const marketplaceModule = {
                             { isMax: amountValue === maxFilledQuantity });
                         return;
                     }
-                    run(() => adapter().createOrder(state.activeId, amountValue, priceValue));
+                    checkedPurchase(amountValue, priceValue,
+                        () => adapter().createOrder(state.activeId, amountValue, priceValue));
                 },
             }, [
                 sell ? 'Place ' : 'Offer to buy ',
@@ -1231,14 +1279,19 @@ export const marketplaceModule = {
             } else if (sell) {
                 actions.appendChild(el('button', {
                     class: 'btn btn-primary btn-sm', type: 'button',
-                    onclick: () => run(() => adapter().takeOrder(order, 'one')),
+                    onclick: () => checkedPurchase(1, order.price,
+                        () => adapter().takeOrder(order, 'one')),
                 }, [bold('Buy One')]));
                 actions.appendChild(el('button', {
                     class: 'btn btn-warning btn-sm', type: 'button',
-                    onclick: () => run(() => adapter().takeOrder(order, 'all')),
+                    // Pin Buy All to the displayed quantity we check: a
+                    // replenished listing must not silently increase the spend.
+                    onclick: () => checkedPurchase(order.amount, order.price,
+                        () => adapter().takeOrder(order, String(order.amount))),
                 }, [bold('Buy All'), ` (${total(state.mult.buy)} bits)`]));
                 actions.appendChild(amountForm('Buy:', 'btn-success',
-                    (n) => run(() => adapter().takeOrder(order, n)),
+                    (n) => checkedPurchase(n, order.price,
+                        () => adapter().takeOrder(order, n)),
                     (n) => `pay ${core.commas(Math.floor(order.price * n * state.mult.buy))} bits`));
             } else {
                 actions.appendChild(el('button', {
@@ -1277,7 +1330,7 @@ export const marketplaceModule = {
             const sellAll = () => el('button', {
                 class: 'btn btn-warning btn-sm clop-sellbtn', type: 'button',
                 onclick: () => regularSale(order.resourceId, order.amount, 'Sell',
-                    () => adapter().takeOrder(order, 'all')),
+                    () => adapter().takeOrder(order, String(order.amount))),
             }, [bold('Sell All'), ` (${allBits} bits)`]);
 
             const up = mode ? null : upkeepFor(order.resourceId);

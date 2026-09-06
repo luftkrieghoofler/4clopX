@@ -25,6 +25,28 @@ function actionName(form) {
     return '';
 }
 
+// The cost is its own line between the description's first <br> and the
+// form. Read the live, region-adjusted amount rather than old catalogue costs.
+export function actionBitsCost(form) {
+    const cell = form.closest('td');
+    if (!cell) return null;
+    let afterDescription = false;
+    let line = '';
+    for (const node of cell.childNodes) {
+        if (node === form) break;
+        if (node.nodeType === 1 && node.tagName.toLowerCase() === 'br') {
+            if (afterDescription) break;
+            afterDescription = true;
+        } else if (afterDescription) {
+            line += node.textContent || '';
+        }
+    }
+    const match = line.trim().match(/^([+-]?(?:\d{1,3}(?:,\d{3})+|\d+))\s+bits$/i);
+    if (!match) return null;
+    const cost = Number(match[1].replace(/,/g, ''));
+    return Number.isSafeInteger(cost) ? cost : null;
+}
+
 export function actionsFromDocument(doc) {
     const actions = new Map();
     for (const form of doc.querySelectorAll('form')) {
@@ -34,6 +56,7 @@ export function actionsFromDocument(doc) {
             id,
             name: actionName(form),
             description: actionDescription(form),
+            bitsCost: actionBitsCost(form),
             form,
         });
     }

@@ -18,7 +18,9 @@
 // Returns {
 //   byName: { <lowercased name>: {name, qty, generated, used, mil, net} },
 //   buildingsByName: { <lowercased name>: {name, qty, disabled, active} },
+//   weaponsByName, armorByName: { <lowercased name>: {name, qty} } | null,
 //   satisfaction: number | null,
+//   funds: number | null,
 //   satisfactionPerTick: number | null, // displayed value, including decay
 //   government: string | null,
 //   at: Date,
@@ -36,11 +38,33 @@ function cellNumber(text) {
     return Number.isFinite(n) ? n : 0;
 }
 
+export function overviewEquipmentFromDocument(doc) {
+    const result = { weaponsByName: null, armorByName: null };
+    for (const panel of doc.querySelectorAll('.panel')) {
+        const title = panel.querySelector('.panel-heading')?.textContent.trim();
+        const key = title === 'Weapons' ? 'weaponsByName' : title === 'Armor' ? 'armorByName' : null;
+        if (!key || !panel.querySelector('table')) continue;
+        const items = {};
+        for (const row of panel.querySelectorAll('tbody tr')) {
+            const cells = row.querySelectorAll('td');
+            if (cells.length < 2) continue;
+            const name = cells[0].textContent.trim();
+            if (!name) continue;
+            const amount = cells[1].textContent.replace(/,/g, '').trim();
+            const qty = /^\d+$/.test(amount) ? Number(amount) : NaN;
+            items[name.toLowerCase()] = { name, qty: Number.isSafeInteger(qty) ? qty : null };
+        }
+        result[key] = items;
+    }
+    return result;
+}
+
 export function nationStatusFromDocument(doc) {
     for (const panel of doc.querySelectorAll('.panel')) {
         const heading = panel.querySelector('.panel-heading');
         if (!heading || heading.textContent.trim() !== 'Nation') continue;
         const status = {
+            funds: null,
             government: null,
             satisfaction: null,
             satisfactionPerTick: null,
@@ -51,6 +75,11 @@ export function nationStatusFromDocument(doc) {
             const label = cells[0].textContent.trim();
             const value = cells[1].textContent.trim();
             if (label === 'Government Type') status.government = value;
+            if (label === 'Funds') {
+                const match = value.match(/^([+-]?(?:\d{1,3}(?:,\d{3})+|\d+))\s+bits$/i);
+                const funds = match ? Number(match[1].replace(/,/g, '')) : NaN;
+                if (Number.isSafeInteger(funds)) status.funds = funds;
+            }
             if (label === 'Satisfaction') {
                 status.satisfaction = cellNumber(value);
                 const perTick = value.match(/\(\s*([+-]?[\d,]+)\s+per tick\s*\)/i);
@@ -59,7 +88,7 @@ export function nationStatusFromDocument(doc) {
         }
         return status;
     }
-    return { government: null, satisfaction: null, satisfactionPerTick: null };
+    return { funds: null, government: null, satisfaction: null, satisfactionPerTick: null };
 }
 
 export function nationSatisfactionFromDocument(doc) {
@@ -191,6 +220,7 @@ export function parseResourceStats(doc) {
         return {
             byName,
             buildingsByName,
+            ...overviewEquipmentFromDocument(doc),
             ...nation,
             at: new Date(),
         };
@@ -219,6 +249,7 @@ function snapshotResourceStats(stats, at = Date.now()) {
     return {
         at: Number(at) || Date.now(),
         byName,
+        funds: statusNumber(stats && stats.funds),
         satisfaction: statusNumber(stats && stats.satisfaction),
         satisfactionPerTick: statusNumber(stats && stats.satisfactionPerTick),
         government: stats && stats.government ? String(stats.government) : null,

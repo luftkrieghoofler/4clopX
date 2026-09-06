@@ -686,7 +686,8 @@ export const actionsModule = {
                             })) await submitForm(record.form, submitter);
                             return;
                         }
-                        if (!actionNeedsSafetyCheck(state.expected, BUILDING_UPKEEP, BUILDING_EFFECTS)) {
+                        const action = { ...state.expected, bitsCost: state.actual.bitsCost };
+                        if (!actionNeedsSafetyCheck(action, BUILDING_UPKEEP, BUILDING_EFFECTS)) {
                             await submitForm(record.form, submitter);
                             return;
                         }
@@ -709,7 +710,7 @@ export const actionsModule = {
                             return;
                         }
                         const affordability = projectActionAffordability(
-                            state.expected, submission.times, stats);
+                            action, submission.times, stats);
                         const risks = projectActionRisks(
                             state.expected, submission.times, stats, BUILDING_UPKEEP);
                         const satisfactionProjection = projectActionSatisfaction(

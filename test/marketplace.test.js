@@ -2,17 +2,97 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import {
-    negativeNetConfirmationEnabled, orderShouldStayEmphasized,
+    marketPurchaseShortage, performMarketPurchase, negativeNetConfirmationEnabled, orderShouldStayEmphasized,
     saleResourceRisks, sellRevenueAfterTax, unitPriceForSellRevenue,
 } from '../src/ui/marketplace.js';
 import {
-    marketMessagesFromDocument, marketResourceFromLocation, marketResourcesFromDocument,
+    createMarketAdapter, marketMessagesFromDocument, marketResourceFromLocation, marketResourcesFromDocument,
     marketViewUrl, summarizeFriendly,
 } from '../src/adapters/market.js';
 import {
     buyerResourceHasSpare, friendlyTotals, liveUpdatesModule,
     marketBadgeAccentForStockColor, watchedOrderTotals, writeFriendlyCacheEntry,
 } from '../src/ui/liveupdates.js';
+
+test('market purchase affordability includes tax and rounds the total once, as the server does', () => {
+    const snapshot = { funds: '3,152 Bits', mult: { buy: 1.05 } };
+    assert.deepEqual(marketPurchaseShortage(snapshot, 3, 1001), {
+        name: 'Bits', required: 3153, stock: 3152, shortage: 1,
+    });
+    assert.equal(marketPurchaseShortage({ ...snapshot, funds: '3,153' }, 3, 1001), null);
+    assert.deepEqual(marketPurchaseShortage({ ...snapshot, funds: '0 Bits' }, 1, 1000), {
+        name: 'Bits', required: 1050, stock: 0, shortage: 1050,
+    });
+    assert.throws(() => marketPurchaseShortage({ ...snapshot, funds: null }, 1, 1000));
+    assert.throws(() => marketPurchaseShortage({ ...snapshot, mult: null }, 1, 1000));
+    assert.throws(() => marketPurchaseShortage(snapshot, Number.MAX_SAFE_INTEGER, 1000));
+});
+
+test('purchase and buy-offer preflight sends nothing on dismissal and attempts exactly once on override', async () => {
+    let requests = 0;
+    let confirmations = 0;
+    let allow = false;
+    let funds = '100 Bits';
+    const adapter = { inspect: async () => ({ funds, mult: { buy: 1.05 } }) };
+    const core = {
+        el: (tag, attrs, children) => ({ tag, attrs, children }),
+        commas: String,
+        confirm: async (options) => {
+            confirmations += 1;
+            assert.equal(options.cancelLabel, 'OK');
+            assert.equal(options.confirmLabel, 'Attempt anyway');
+            return allow;
+        },
+    };
+    const action = async () => { requests += 1; return { updated: true }; };
+    assert.equal(await performMarketPurchase(core, adapter, '2', '1000', action), null);
+    assert.equal(requests, 0);
+    allow = true;
+    assert.deepEqual(await performMarketPurchase(core, adapter, '2', '1000', action), { updated: true });
+    assert.equal(requests, 1);
+    assert.equal(confirmations, 2, 'only one dialog per attempt');
+    funds = '2,100 Bits';
+    await performMarketPurchase(core, adapter, '2', '1000', action);
+    assert.equal(requests, 2);
+    assert.equal(confirmations, 2, 'an affordable purchase does not ask for confirmation');
+    adapter.inspect = async () => { throw new Error('Offline'); };
+    await assert.rejects(performMarketPurchase(core, adapter, '2', '1000', action), /Offline/);
+    assert.equal(requests, 2);
+});
+
+test('preflight refreshes funds, tax and stock with GET for both sides and every marketplace mode', async () => {
+    for (const side of ['sell', 'buyer']) {
+        for (const mode of ['', 'weapons', 'armor']) {
+            const calls = [];
+            const doc = {
+                querySelector: (selector) => selector === 'input[name^="token_"]'
+                    ? { value: 'fresh', getAttribute: () => 'token_marketplace' } : null,
+                querySelectorAll: (selector) => {
+                    if (selector === '#content .well') return [{
+                        textContent: 'Funds: 25,000 Bits',
+                        querySelector: () => ({ textContent: '25,000 Bits' }),
+                    }];
+                    if (selector === '#content .alert-info') return [{
+                        textContent: 'Due to your economic type, you will pay 5% more and receive 5% less.',
+                    }];
+                    if (selector === 'select[name="resource_id"] option') return [{
+                        value: '2', textContent: 'Item (Have 12)', hasAttribute: () => false,
+                    }];
+                    return [];
+                },
+            };
+            const adapter = createMarketAdapter({ http: {
+                getDoc: async (url) => { calls.push(url); return doc; },
+                postForm: () => assert.fail('inspection must not submit an action'),
+            } }, side, mode);
+            const snapshot = await adapter.inspect();
+            assert.deepEqual(calls, [`${side === 'sell' ? '' : 'buyer'}marketplace.php${mode ? `?mode=${mode}` : ''}`]);
+            assert.equal(snapshot.funds, '25,000 Bits');
+            assert.equal(snapshot.mult.buy, 1.05);
+            assert.equal(snapshot.resources[0].have, 12);
+        }
+    }
+});
 
 test('uses green market badges only when the game theme already uses blue badges', () => {
     assert.equal(marketBadgeAccentForStockColor('rgb(42, 159, 214)'), '#5cb85c');

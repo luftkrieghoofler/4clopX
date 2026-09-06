@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import {
-    newlyCriticalOverviewBuffers, newlyCriticalResources, overviewResourceRows,
+    newlyCriticalOverviewBuffers, newlyCriticalResources, overviewEquipmentFromDocument, overviewResourceRows,
     overviewSatisfactionRow, publishResourceStats, readCachedResourceStats,
     RESOURCE_STATS_CACHE_KEY, resourceBufferSummary, resourceTicksWorth,
 } from '../src/adapters/overview.js';
@@ -19,6 +19,27 @@ import {
     overviewContentSignature, overviewModule, replaceOverviewContent,
 } from '../src/ui/overview.js';
 
+test('reads weapons and armor stock without treating equipment loss as resource upkeep', () => {
+    const equipmentPanel = (title, values) => ({
+        querySelector: (selector) => selector === '.panel-heading' ? { textContent: title } : {},
+        querySelectorAll: () => values.map(([name, quantity, loss]) => ({
+            querySelectorAll: () => [name, quantity, loss].map((textContent) => ({ textContent })),
+        })),
+    });
+    assert.deepEqual(overviewEquipmentFromDocument({ querySelectorAll: () => [
+        equipmentPanel('Weapons', [['Scrounged Weapons', '1,234', '1']]),
+        equipmentPanel('Armor', [['Scrounged Armor', '12', '0']]),
+    ] }), {
+        weaponsByName: { 'scrounged weapons': { name: 'Scrounged Weapons', qty: 1234 } },
+        armorByName: { 'scrounged armor': { name: 'Scrounged Armor', qty: 12 } },
+    });
+    assert.deepEqual(overviewEquipmentFromDocument({ querySelectorAll: () => [] }), {
+        weaponsByName: null, armorByName: null,
+    }, 'missing tables must not be interpreted as empty inventory');
+    assert.deepEqual(overviewEquipmentFromDocument({ querySelectorAll: () => [
+        equipmentPanel('Weapons', []), equipmentPanel('Armor', []),
+    ] }), { weaponsByName: {}, armorByName: {} });
+});
 test('Overview live rendering is scoped to the Overview page', () => {
     assert.equal(overviewModule.matches('overview.php'), true);
     assert.equal(overviewModule.matches('favoriteactions.php'), false);
@@ -297,6 +318,7 @@ test('publishes a compact Overview warning snapshot for other tabs', () => {
                     name: 'Oil', qty: 12, generated: 0, used: 5, mil: 10, net: -5,
                 },
             },
+            funds: 1234567,
             satisfaction: 123,
             satisfactionPerTick: -7,
             government: 'Loose Despotism',
@@ -305,6 +327,7 @@ test('publishes a compact Overview warning snapshot for other tabs', () => {
 
         assert.equal(values.has(RESOURCE_STATS_CACHE_KEY), true);
         assert.deepEqual(readCachedResourceStats(), published);
+        assert.equal(published.funds, 1234567);
         assert.equal(published.satisfaction, 123);
         assert.equal(published.satisfactionPerTick, -7);
         assert.equal(published.government, 'Loose Despotism');
