@@ -12,7 +12,7 @@
 //   clopx.live.nextAt    number           when the next poll is due
 //   clopx.live.pollNow   number           "poll immediately" signal
 //   clopx.live.seen      number           last time any tab was visible
-//   clopx.live.badges    {at, values}     last header badge values
+//   clopx.live.badges    {at, values, tickSeconds} last header snapshot
 //   clopx.live.overview  {at, ...}        last Overview safety values
 //   clopx.live.polled    number           a poll cycle finished (signal)
 //   clopx.live.friendly  {key: {...}}     the friendly-order cache, keyed
@@ -36,7 +36,8 @@
 // ui/autologin.js) or stops rather than loop.
 
 import { marketAdapter, marketPageUrl, summarizeFriendly } from '../adapters/market.js';
-import { headerBadges, applyHeaderBadges, HEADER_PROBE_PAGE } from '../adapters/header.js';
+import { headerBadges, applyHeaderBadges, fetchedTickSeconds, HEADER_PROBE_PAGE } from '../adapters/header.js';
+import { createTickTimer } from './tick-timer.js';
 import { isLoggedInDoc, login, CRED_KEY } from '../adapters/session.js';
 import { protectedReserve } from '../lib/upkeep-safety.js';
 import {
@@ -386,6 +387,8 @@ export const liveUpdatesModule = {
         let pollTimer = null;
         let currentView = null;      // {mode, side, resourceId, at} open in THIS tab's marketplace
         const loadedAt = (typeof performance !== 'undefined' && performance.timeOrigin) || Date.now();
+        const syncTickTimer = createTickTimer(document,
+            typeof unsafeWindow !== 'undefined' ? unsafeWindow : window);
 
         const stockBadgeProbe = el('span', { class: 'badge' }, ['0']);
         stockBadgeProbe.style.cssText = 'position:absolute;visibility:hidden;pointer-events:none;';
@@ -667,7 +670,9 @@ export const liveUpdatesModule = {
                     if (what && c.to > c.from) notify(`${c.to} ${what}`, c.key, c.key);
                 }
                 updateTitle();
-                jset(K.badges, { at: Date.now(), values });
+                const headerSnapshot = { at: Date.now(), values, tickSeconds: fetchedTickSeconds(doc) };
+                syncTickTimer(headerSnapshot);
+                jset(K.badges, headerSnapshot);
                 // The complete probe can refresh an open Overview in this
                 // same tab without another request.  Other tabs receive only
                 // the cycle signal below and fetch their own non-persisted
@@ -1012,7 +1017,13 @@ export const liveUpdatesModule = {
         // started loading, since that data is fresher than our render.
         const storedBadges = jget(K.badges, null);
         if (!storedBadges || storedBadges.at < loadedAt) {
-            jset(K.badges, { at: loadedAt, values: headerBadges(document) });
+            const snapshot = {
+                at: loadedAt, values: headerBadges(document), tickSeconds: fetchedTickSeconds(document),
+            };
+            jset(K.badges, snapshot);
+            syncTickTimer(snapshot);
+        } else {
+            syncTickTimer(storedBadges);
         }
 
         window.addEventListener('storage', (ev) => {
@@ -1021,6 +1032,7 @@ export const liveUpdatesModule = {
                 const rec = jget(K.badges, null);
                 if (rec && rec.values) {
                     applyHeaderBadges(rec.values);
+                    syncTickTimer(rec);
                     updateTitle();
                 }
             } else if (ev.key === K.polled) {

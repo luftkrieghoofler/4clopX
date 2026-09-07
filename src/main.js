@@ -27,13 +27,6 @@ core.register(marketplaceModule);
 core.register(actionsModule);
 core.register(dealsModule);
 core.register(settingsModule);
+// Keep core private: exporting it to the page also exposes its privileged
+// secret-storage methods (including access to saved login credentials).
 core.boot();
-
-// Debug handle; also lets ad-hoc modules register from the console.  With
-// GM grants the script runs in the manager's sandbox, so export to the real
-// page window where possible.
-try {
-    (typeof unsafeWindow !== 'undefined' ? unsafeWindow : window).clopX = core;
-} catch (e) {
-    window.clopX = core;
-}

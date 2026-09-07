@@ -26,6 +26,16 @@ export function tickSecondsFromDocument(doc) {
     return tickSecondsFromText(doc.querySelector('#countdown')?.textContent);
 }
 
+// Fetched HTML has not run window.onload; some themes leave #countdown
+// empty until then. Read only the numeric initializer, never execute scripts.
+export function fetchedTickSeconds(doc) {
+    for (const script of doc.querySelectorAll('script:not([src])')) {
+        const match = script.textContent.match(/\bdoCountdownTick\(\s*(\d+)\s*\)\s*;/);
+        if (match) return Number(match[1]);
+    }
+    return tickSecondsFromDocument(doc);
+}
+
 export function formatTickDuration(seconds) {
     const whole = Math.max(0, Math.floor(seconds));
     const minutes = Math.floor(whole / 60);
