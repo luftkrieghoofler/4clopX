@@ -1,5 +1,5 @@
 // Global shortcut bar.  One browser-style save control captures the current
-// view; editing stays in a dedicated manager instead of adding permanent
+// view; editing stays in the Shortcuts settings section instead of adding permanent
 // controls to every stock menu entry.
 
 import { isLoggedInDoc } from '../adapters/session.js';
@@ -95,15 +95,6 @@ export const shortcutsModule = {
             parent: 'shortcuts.visible',
             onChange: () => core.events.emit('shortcuts:layoutChanged', {}),
         });
-        core.settings.define({
-            key: 'shortcuts.manage',
-            section: 'Shortcuts',
-            label: 'Manage shortcuts…',
-            description: 'Rename, reorder, remove, or add several destinations from the stock game menu.',
-            type: 'button',
-            feedback: false,
-            handler: () => core.events.emit('shortcuts:openManager', {}),
-        });
     },
 
     init(core) {
@@ -149,10 +140,6 @@ export const shortcutsModule = {
             .clop-shortcut-popover .form-control { margin-bottom: 9px; }
             .clop-shortcut-popover-actions { display: flex; align-items: center; gap: 6px; }
             .clop-shortcut-popover-actions .clop-spacer { flex: 1; }
-            .clop-shortcut-manager-overlay { position: fixed; inset: 0; z-index: 10030; padding-top: 55px; display: flex; align-items: flex-start; justify-content: center; background: rgba(0,0,0,.55); }
-            .clop-shortcut-manager { width: 680px; max-width: 94vw; }
-            .clop-shortcut-manager .panel-body { max-height: 75vh; overflow-y: auto; }
-            .clop-shortcut-manager .panel-heading .close { line-height: 1; }
             .clop-shortcut-manager-toolbar { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; }
             .clop-shortcut-manager-list { margin-bottom: 12px; }
             .clop-shortcut-manager-item { display: grid; grid-template-columns: 24px minmax(150px, 1fr) auto; align-items: center; gap: 8px; padding: 8px 0; border-bottom: 1px solid #eee; }
@@ -476,18 +463,12 @@ export const shortcutsModule = {
             return `${MODE_LABELS[target.mode]} · ${SIDE_LABELS[target.side]} · ${target.resourceName}`;
         }
 
-        function closeManager() {
-            if (!manager) return;
-            document.removeEventListener('keydown', manager.onKey);
-            manager.overlay.remove();
-            manager = null;
+        function openManager() {
+            closePopover();
+            core.events.emit('settings:open', { section: 'Shortcuts' });
         }
 
-        function openManager() {
-            if (manager) return;
-            core.events.emit('settings:close', {});
-            closePopover();
-
+        function createEditor() {
             const savedBox = el('div', { class: 'clop-shortcut-manager-list' });
             const menuBox = el('div');
             const menuSearch = el('input', {
@@ -507,7 +488,7 @@ export const shortcutsModule = {
                 class: 'btn btn-primary btn-sm', type: 'button',
                 onclick: () => saveCurrentView(false),
             }, ['Add current view']);
-            const body = el('div', { class: 'panel-body' }, [
+            const body = el('div', { class: 'clop-shortcut-manager' }, [
                 el('p', { class: 'text-muted' }, [
                     'Shortcuts are real links: drag or use the arrow buttons to reorder them, and edit their visible labels here.',
                 ]),
@@ -515,20 +496,7 @@ export const shortcutsModule = {
                 savedBox,
                 menuPicker,
             ]);
-            const overlay = el('div', {
-                class: 'clop-shortcut-manager-overlay',
-                onclick: (ev) => { if (ev.target === overlay) closeManager(); },
-            }, [
-                el('div', { class: 'panel panel-default clop-shortcut-manager' }, [
-                    el('div', { class: 'panel-heading' }, [
-                        el('button', { class: 'close', type: 'button', html: '&times;', onclick: closeManager }),
-                        'Manage shortcuts',
-                    ]),
-                    body,
-                ]),
-            ]);
-            const onKey = (ev) => { if (ev.key === 'Escape') closeManager(); };
-            manager = { overlay, onKey, savedBox, menuBox, menuSearch, menuPicker, menuToggle, addCurrent };
+            manager = { savedBox, menuBox, menuSearch, menuPicker, menuToggle, addCurrent };
 
             menuToggle.addEventListener('click', () => {
                 const opening = menuPicker.style.display === 'none';
@@ -537,10 +505,12 @@ export const shortcutsModule = {
                 if (opening) { renderMenuPicker(); menuSearch.focus(); }
             });
             menuSearch.addEventListener('input', renderMenuPicker);
-            document.body.appendChild(overlay);
-            document.addEventListener('keydown', onKey);
             renderManagerSaved();
             renderMenuPicker();
+            return {
+                node: body,
+                destroy() { manager = null; },
+            };
         }
 
         function moveShortcut(id, delta) {
@@ -742,6 +712,7 @@ export const shortcutsModule = {
 
         core.shortcuts = {
             openManager,
+            createEditor,
             captureCurrent,
             items,
             toolHost: () => (core.settings.get('shortcuts.visible') && items().length ? barTools : null),

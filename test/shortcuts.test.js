@@ -71,6 +71,8 @@ test('defines the timer placement as an enabled-by-default child setting', () =>
     });
 
     const timer = definitions.find((definition) => definition.key === 'shortcuts.timerInBar');
+    assert.equal(definitions.some((definition) => definition.key === 'shortcuts.manage'), false,
+        'the inline editor replaces the old settings button for a separate modal');
     assert.equal(timer.type, 'bool');
     assert.equal(timer.default, true);
     assert.equal(timer.parent, 'shortcuts.visible');

@@ -16,6 +16,7 @@ import {
     setFavourite, favouriteStorageChange, marketCatalogStorageMode,
 } from '../lib/favourites.js';
 import { marketNotifyEnabled, forgetMarket } from './liveupdates.js';
+import { createSettingsSections, settingsSections } from './settings-sections.js';
 
 const MODE_LABELS = [['', 'Resources'], ['weapons', 'Weapons'], ['armor', 'Armor']];
 
@@ -29,9 +30,19 @@ export const settingsModule = {
         const el = core.el.bind(core);
 
         core.addStyle(`
-            .clop-settings-overlay { position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,.55); z-index: 10000; display: flex; align-items: flex-start; justify-content: center; padding-top: 60px; }
-            .clop-settings-panel { width: 620px; max-width: 92vw; margin: 0; }
-            .clop-settings-panel .panel-body { max-height: 70vh; overflow-y: auto; }
+            .clop-settings-overlay { position: fixed; inset: 0; background: rgba(0,0,0,.55); z-index: 10000; display: flex; align-items: flex-start; justify-content: center; padding-top: 6vh; }
+            .clop-settings-panel { width: 860px; max-width: 94vw; margin: 0; }
+            .clop-settings-panel > .panel-body { padding: 0; }
+            .clop-settings-layout { display: flex; height: 70vh; }
+            .clop-settings-nav { flex: 0 0 175px; display: flex; flex-direction: column; padding: 12px 0 12px 12px; overflow-y: auto; background: linear-gradient(to left, var(--clop-settings-border, #ddd) 1px, transparent 1px); }
+            .clop-settings-tab { appearance: none; display: block; flex-shrink: 0; margin: 0 0 4px; padding: 10px 13px; border: 1px solid var(--clop-settings-border, #ddd); border-radius: 5px 0 0 5px; background: rgba(128,128,128,.06); color: inherit; font: inherit; text-align: left; white-space: normal; cursor: pointer; box-shadow: none; text-shadow: none; }
+            .clop-settings-tab:hover { background: rgba(128,128,128,.12); }
+            .clop-settings-tab.active { background: var(--clop-settings-background, #fff); border-right-color: var(--clop-settings-background, #fff); font-weight: bold; }
+            .clop-settings-tab:focus-visible { outline: 2px solid currentColor; outline-offset: -4px; }
+            .clop-settings-content { flex: 1; min-width: 0; min-height: 0; }
+            .clop-settings-section { height: 100%; overflow-y: auto; padding: 15px; }
+            .clop-settings-section[hidden] { display: none; }
+            .clop-settings-panel .panel-footer { font-size: 12px; }
             .clop-settings-panel .panel-heading .close { line-height: 1; }
             .clop-setting { margin-bottom: 14px; }
             .clop-setting.checkbox { margin-top: 0; }
@@ -46,26 +57,33 @@ export const settingsModule = {
             .clop-setting-choice .btn.active .clop-choice-example { box-shadow: 0 0 0 1px rgba(255,255,255,.9), 0 0 0 2px rgba(0,0,0,.22); }
             .clop-setting-group { font-weight: bold; margin: 12px 0 4px 0; }
             .clop-section-heading { font-weight: bold; font-size: 15px; border-bottom: 1px solid rgba(128,128,128,.4); padding-bottom: 4px; margin: 20px 0 10px 0; }
-            .clop-settings-panel .panel-body > .clop-section-heading:first-child { margin-top: 0; }
+            .clop-settings-section > .clop-section-heading:first-child { margin-top: 0; }
             .clop-setting label { font-weight: normal; }
-            .clop-market-editor-heading { width: 100%; padding: 0; color: inherit; text-align: left; font-weight: bold; text-decoration: none !important; }
-            .clop-market-editor-heading .clop-chevron { display: inline-block; width: 16px; }
-            .clop-market-editor-body { padding-top: 10px; }
             .clop-market-editor-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 8px; }
             .clop-market-editor-controls .btn-group .btn.active { color: #fff; background: #5bc0de; border-color: #46b8da; box-shadow: none; text-shadow: none; }
             .clop-market-editor-search { width: 165px; }
             .clop-market-editor-dna { margin: 0 0 0 auto; font-weight: normal; white-space: nowrap; }
             .clop-market-editor-dna input { margin-right: 4px; }
             .clop-market-editor-table { margin-bottom: 4px; }
-            .clop-market-editor-table th { background: #fff; position: sticky; top: 0; z-index: 1; }
+            .clop-market-editor-table th { background: var(--clop-settings-background, #fff); position: sticky; top: -15px; z-index: 1; }
             .clop-market-editor-table th:not(:first-child), .clop-market-editor-table td:not(:first-child) { width: 68px; text-align: center; }
             .clop-market-editor-empty { padding: 12px !important; }
+            @media (max-width: 650px) {
+                .clop-settings-layout { flex-direction: column; }
+                .clop-settings-nav { flex: 0 0 auto; flex-direction: row; flex-wrap: wrap; gap: 4px; padding: 8px; background: none; border-bottom: 1px solid var(--clop-settings-border, #ddd); }
+                .clop-settings-tab { font-size: 12px; margin: 0; padding: 8px 10px; border-radius: 5px; }
+                .clop-settings-tab.active { border-right-color: var(--clop-settings-border, #ddd); }
+            }
         `);
 
         let overlay = null;
         const settingRefreshers = new Map();
         const dependencyRefreshers = [];
         let marketEditor = null;
+        let shortcutEditor = null;
+        let sectionView = null;
+        let lastSection = 'General';
+        let returnFocus = null;
 
         core.events.on('settings:changed', ({ key, value }) => {
             const refresh = settingRefreshers.get(key);
@@ -81,6 +99,7 @@ export const settingsModule = {
             if (marketEditor) marketEditor.refreshFavourites(change);
         });
         core.events.on('settings:close', closePanel);
+        core.events.on('settings:open', ({ section } = {}) => openPanel(section));
         window.addEventListener('storage', (ev) => {
             const favouriteChange = favouriteStorageChange(ev.key);
             if (favouriteChange) core.events.emit('market:favouritesChanged', favouriteChange);
@@ -89,52 +108,101 @@ export const settingsModule = {
         });
 
         function onKey(ev) {
-            if (ev.key === 'Escape') closePanel();
+            if (ev.defaultPrevented) return;
+            if (ev.key === 'Escape') {
+                ev.preventDefault();
+                closePanel();
+            }
+            if (ev.key !== 'Tab') return;
+            const controls = [...overlay.querySelectorAll('button, input, a[href], [tabindex]')]
+                .filter((node) => !node.disabled && node.tabIndex >= 0 && node.getClientRects().length);
+            const first = controls[0];
+            const last = controls.at(-1);
+            if (ev.shiftKey && document.activeElement === first) {
+                ev.preventDefault();
+                last?.focus();
+            } else if (!ev.shiftKey && document.activeElement === last) {
+                ev.preventDefault();
+                first?.focus();
+            }
         }
 
         function closePanel() {
             if (!overlay) return;
+            sectionView.commitFocused();
             overlay.remove();
             overlay = null;
+            sectionView = null;
             settingRefreshers.clear();
             dependencyRefreshers.length = 0;
             if (marketEditor) marketEditor.destroy();
             marketEditor = null;
+            if (shortcutEditor) shortcutEditor.destroy();
+            shortcutEditor = null;
             document.removeEventListener('keydown', onKey);
+            if (returnFocus?.isConnected) returnFocus.focus();
+            returnFocus = null;
         }
 
-        function openPanel() {
-            if (overlay) return;
+        function openPanel(section) {
+            if (overlay) {
+                if (section) sectionView.select(section);
+                return;
+            }
+            returnFocus = document.activeElement;
             settingRefreshers.clear();
             dependencyRefreshers.length = 0;
             const body = el('div', { class: 'panel-body' });
-            // Group by each definition's `section`, in first-seen order
-            // (module registration order: Auto-login, Live updates, Market).
-            const sections = new Map();
-            for (const def of core.settings.all()) {
-                const label = def.section || 'General';
-                if (!sections.has(label)) sections.set(label, []);
-                sections.get(label).push(def);
-            }
-            for (const [label, defs] of sections) {
-                body.appendChild(el('div', { class: 'clop-section-heading' }, [label]));
-                for (const def of defs) body.appendChild(settingRow(def));
-            }
-            marketEditor = marketEditorSection();
-            body.appendChild(marketEditor.node);
+            sectionView = createSettingsSections(core,
+                settingsSections(core.settings.all()).map(([label, defs]) => ({
+                    label,
+                    mount(panel) {
+                        panel.appendChild(el('h3', { class: 'clop-section-heading' }, [label]));
+                        let previousGroup = null;
+                        for (const def of defs) {
+                            if (label === 'Actions & deals' && def.section !== previousGroup) {
+                                panel.appendChild(el('div', { class: 'clop-setting-group' }, [def.section]));
+                                previousGroup = def.section;
+                            }
+                            panel.appendChild(settingRow(def));
+                        }
+                        if (label === 'Market favourites') {
+                            marketEditor = marketEditorSection();
+                            panel.appendChild(marketEditor.node);
+                            marketEditor.start();
+                        }
+                        if (label === 'Shortcuts' && core.shortcuts) {
+                            shortcutEditor = core.shortcuts.createEditor();
+                            panel.appendChild(shortcutEditor.node);
+                        }
+                    },
+                })), {
+                    selected: section || lastSection,
+                    onSelect: (label) => { lastSection = label; },
+                });
+            body.appendChild(sectionView.node);
             overlay = el('div', {
                 class: 'clop-settings-overlay',
                 onclick: (ev) => { if (ev.target === overlay) closePanel(); },
             }, [
-                el('div', { class: 'panel panel-default clop-settings-panel' }, [
+                el('div', {
+                    class: 'panel panel-default clop-settings-panel', role: 'dialog',
+                    'aria-modal': 'true', 'aria-labelledby': 'clop-settings-title',
+                }, [
                     el('div', { class: 'panel-heading' }, [
-                        el('button', { class: 'close', type: 'button', html: '&times;', onclick: closePanel }),
-                        '4clopX Settings',
+                        el('button', { class: 'close', type: 'button', 'aria-label': 'Close settings', html: '&times;', onclick: closePanel }),
+                        el('span', { id: 'clop-settings-title' }, ['4clopX Settings']),
                     ]),
                     body,
+                    el('div', { class: 'panel-footer text-muted' }, ['Changes save automatically.']),
                 ]),
             ]);
             document.body.appendChild(overlay);
+            const panel = overlay.querySelector('.clop-settings-panel');
+            const panelStyle = window.getComputedStyle(panel);
+            panel.style.setProperty('--clop-settings-background', panelStyle.backgroundColor);
+            panel.style.setProperty('--clop-settings-border', panelStyle.borderTopColor);
+            sectionView.start();
             document.addEventListener('keydown', onKey);
         }
 
@@ -289,7 +357,6 @@ export const settingsModule = {
         // distant sections whose rows mutate each other off-screen.
         function marketEditorSection() {
             const state = {
-                expanded: false,
                 mode: '',
                 view: 'all',
                 showDna: false,
@@ -301,17 +368,7 @@ export const settingsModule = {
             let favouriteInputs = [];
             let watchInputs = [];
 
-            const chevron = el('span', { class: 'clop-chevron' }, ['▸']);
-            const content = el('div', { class: 'clop-market-editor-body', style: 'display: none;' });
-            const heading = el('button', {
-                class: 'btn btn-link clop-market-editor-heading',
-                type: 'button',
-                'aria-expanded': 'false',
-            }, [chevron, ' Favourite and watched markets']);
-            const node = el('div', { class: 'clop-market-editor' }, [
-                el('div', { class: 'clop-section-heading' }, [heading]),
-                content,
-            ]);
+            const content = el('div', { class: 'clop-market-editor' });
 
             const modeButtons = new Map();
             const viewButtons = new Map();
@@ -469,7 +526,7 @@ export const settingsModule = {
             }
 
             function renderTable() {
-                if (destroyed || !state.expanded) return;
+                if (destroyed) return;
                 favouriteInputs = [];
                 watchInputs = [];
                 tableBox.textContent = '';
@@ -575,24 +632,16 @@ export const settingsModule = {
                 }
             }
 
-            heading.addEventListener('click', () => {
-                state.expanded = !state.expanded;
-                heading.setAttribute('aria-expanded', state.expanded ? 'true' : 'false');
-                chevron.textContent = state.expanded ? '▾' : '▸';
-                content.style.display = state.expanded ? '' : 'none';
-                if (state.expanded) {
-                    refreshControls();
-                    renderTable();
-                    ensureCatalog(state.mode);
-                }
-            });
-
             refreshControls();
             const api = {
-                node,
+                node: content,
+                start() {
+                    renderTable();
+                    ensureCatalog(state.mode);
+                },
                 refreshWatches: refreshWatchInputs,
                 refreshFavourites(change) {
-                    if (!state.expanded || (change && change.mode !== state.mode)) return;
+                    if (change && change.mode !== state.mode) return;
                     if (state.view === 'watch') renderTable();
                     else {
                         refreshFavouriteInputs();
@@ -600,7 +649,7 @@ export const settingsModule = {
                     }
                 },
                 refreshCatalog(mode) {
-                    if (state.expanded && state.view === 'all' && mode === state.mode) renderTable();
+                    if (state.view === 'all' && mode === state.mode) renderTable();
                 },
                 destroy() { destroyed = true; },
             };
@@ -612,7 +661,7 @@ export const settingsModule = {
         navRight.insertBefore(el('li', {}, [el('a', {
             style: 'cursor: pointer;',
             title: '4clopX settings',
-            onclick: openPanel,
+            onclick: () => openPanel(),
         }, ['⚙'])]), navRight.firstElementChild);
     },
 };
