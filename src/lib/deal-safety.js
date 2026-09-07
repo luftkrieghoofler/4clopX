@@ -36,7 +36,9 @@ export function projectDealAffordability(deal, stats) {
     return shortages.sort((a, b) => a.name.localeCompare(b.name));
 }
 
-// Project the final resource stock after both sides of an incoming deal.
+// Project our stock from normalized received (offered) and spent (requested)
+// items. Incoming deals include both sides; outgoing draft edits include only
+// their immediate costs, never the eventual requested proceeds.
 // Unrecognized rows are weapons/armor (the stock page labels their requested
 // tables "Requested Items" too), so only names present in Overview resources
 // participate in resource-upkeep protection.

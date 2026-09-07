@@ -1,4 +1,4 @@
-import { incomingDealsFromDocument } from '../adapters/deals.js';
+import { incomingDealsFromDocument, outgoingDealFromForm } from '../adapters/deals.js';
 import { fetchResourceStats } from '../adapters/overview.js';
 import { projectDealAffordability, projectDealRisks } from '../lib/deal-safety.js';
 import { upkeepWarningSection } from './upkeep-warning.js';
@@ -11,14 +11,14 @@ export const dealsModule = {
     name: 'deals',
 
     matches(page) {
-        return page === 'deals.php';
+        return page === 'deals.php' || page === 'makedeal.php';
     },
 
     settings(core) {
         core.settings.define({
             key: SETTING_KEY,
             label: 'Confirm deals that dip into upkeep',
-            description: 'Ask for confirmation when accepting a deal would leave resource stock below tick consumption and military upkeep.',
+            description: 'Ask for confirmation when offering items in an outgoing deal or accepting an incoming deal would leave stock below tick consumption and military upkeep.',
             type: 'bool',
             default: true,
             section: 'Deals',
@@ -26,9 +26,26 @@ export const dealsModule = {
     },
 
     init(core) {
-        const deals = incomingDealsFromDocument(document);
+        const deals = incomingDealsFromDocument(document).map((record) => ({
+            form: record.form, button: record.accept,
+            read: () => ({ ...record, operation: 'Accept deal' }),
+            verb: 'Accept', target: 'this deal',
+        }));
+        const forms = [...document.querySelectorAll('#content form')];
+        // makedeal.php is itself restricted to active State Controlled
+        // economies. Only adding items/money spends stock, not finalizing.
+        for (const form of forms) {
+            if (!form.querySelector('input[name="token_makedeal"]')) continue;
+            const button = form.querySelector('[name="offeritem"], [name="askitem"], [name="offermoney"]');
+            if (!button) continue;
+            deals.push({
+                form, button, read: () => outgoingDealFromForm(form, button),
+                verb: 'Add', target: 'this to the deal',
+            });
+        }
         if (!deals.length) return;
         const el = core.el.bind(core);
+        let pending = false;
 
         core.addStyle(`
             form.clop-deal-checking { opacity: .7; pointer-events: none; }
@@ -37,41 +54,48 @@ export const dealsModule = {
         function setChecking(record, checking) {
             record.form.classList.toggle('clop-deal-checking', checking);
             if (checking) {
-                record.accept.dataset.clopOldLabel = record.accept.value || record.accept.textContent;
-                if ('value' in record.accept) record.accept.value = 'Checking safety…';
-                else record.accept.textContent = 'Checking safety…';
+                record.oldLabel = record.button.value || record.button.textContent;
+                if ('value' in record.button) record.button.value = 'Checking safety…';
+                else record.button.textContent = 'Checking safety…';
+                // Freeze the submitted values and other draft operations
+                // while fetching/confirming (all forms share a POST token).
+                record.controls = forms.flatMap((form) => [...form.querySelectorAll('input, select, button, textarea')])
+                    .map((control) => ({ control, disabled: control.disabled }));
+                for (const { control } of record.controls) control.disabled = true;
             } else {
-                const old = record.accept.dataset.clopOldLabel;
-                if (old !== undefined) {
-                    if ('value' in record.accept) record.accept.value = old;
-                    else record.accept.textContent = old;
-                    delete record.accept.dataset.clopOldLabel;
+                if (record.oldLabel !== undefined) {
+                    if ('value' in record.button) record.button.value = record.oldLabel;
+                    else record.button.textContent = record.oldLabel;
+                    delete record.oldLabel;
                 }
+                for (const { control, disabled } of record.controls || []) control.disabled = disabled;
+                record.controls = null;
             }
         }
 
-        function submitAccept(record) {
+        function submitDeal(record) {
+            setChecking(record, false);
             // Native form.submit() omits submit-button fields, but the server
-            // dispatches on `acceptdeal`; add an equivalent successful field.
+            // dispatches on their names; add the chosen successful field.
             record.form.appendChild(el('input', {
                 type: 'hidden',
-                name: 'acceptdeal',
-                value: record.accept.dataset.clopOldLabel || record.accept.value || 'Accept Deal',
+                name: record.button.name,
+                value: record.button.value || record.button.textContent,
             }));
             HTMLFormElement.prototype.submit.call(record.form);
         }
 
-        function confirmRisks(risks, affordability) {
+        function confirmRisks(record, deal, risks, affordability) {
             const warnings = warningGroup(core, [upkeepWarningSection(core, risks)]);
             return core.confirm(affordabilityDialogOptions(core, affordability, {
-                title: 'Review action: Accept deal',
-                operation: 'Accept deal',
+                title: `Review action: ${deal.operation}`,
+                operation: deal.operation,
                 warningCount: risks.length,
                 body: el('div', {}, [
                     ...(warnings ? [warnings] : []),
-                    el('p', {}, ['Accept this deal anyway?']),
+                    el('p', {}, [`${record.verb} ${record.target} anyway?`]),
                 ]),
-                confirmLabel: 'Accept anyway',
+                confirmLabel: `${record.verb} anyway`,
             }));
         }
 
@@ -84,36 +108,41 @@ export const dealsModule = {
             record.form.addEventListener('submit', async (event) => {
                 const submitter = event.submitter || clickedSubmitter;
                 clickedSubmitter = null;
-                if (!submitter || submitter.name !== 'acceptdeal') return;
+                if (submitter !== record.button) return;
 
                 event.preventDefault();
-                if (record.form.classList.contains('clop-deal-checking')) return;
+                if (pending) return;
+                pending = true;
                 setChecking(record, true);
                 try {
                     let stats;
+                    let deal;
                     try {
+                        deal = record.read();
+                        if (!deal) { submitDeal(record); return; }
                         stats = await fetchResourceStats(core);
                     } catch (error) {
                         if (await core.confirm({
                             title: 'Deal safety unavailable',
                             body: el('div', {}, [
                                 el('div', { class: 'alert alert-danger' }, [
-                                    `4clopX could not load your current funds, inventory and upkeep ` +
+                                    `4clopX could not check this deal against your current funds, inventory and upkeep ` +
                                     `(${String(error.message || error)}).`,
                                 ]),
-                                el('p', {}, ['Accept this deal without safety checks?']),
+                                el('p', {}, [`${record.verb} ${record.target} without safety checks?`]),
                             ]),
-                            confirmLabel: 'Accept without protection',
-                        })) submitAccept(record);
+                            confirmLabel: `${record.verb} without protection`,
+                        })) submitDeal(record);
                         return;
                     }
 
-                    const risks = core.settings.get(SETTING_KEY) ? projectDealRisks(record, stats) : [];
-                    const affordability = projectDealAffordability(record, stats);
+                    const risks = core.settings.get(SETTING_KEY) ? projectDealRisks(deal, stats) : [];
+                    const affordability = projectDealAffordability(deal, stats);
                     if ((!risks.length && !affordability.length)
-                        || await confirmRisks(risks, affordability)) submitAccept(record);
+                        || await confirmRisks(record, deal, risks, affordability)) submitDeal(record);
                 } finally {
                     setChecking(record, false);
+                    pending = false;
                 }
             });
         }
