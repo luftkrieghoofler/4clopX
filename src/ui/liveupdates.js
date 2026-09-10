@@ -367,6 +367,14 @@ export const liveUpdatesModule = {
             onChange: () => core.events.emit('overview:resourceStats', {}),
         });
         core.settings.define({
+            key: 'market.desktopNotifications',
+            section: 'Market',
+            label: 'Desktop notifications for watched-market orders',
+            description: 'Notify about new actionable alliance/friend orders in watched markets. Requires desktop notifications to be enabled in General. Turning this off leaves market polling, badges, and tab-title counts unchanged.',
+            type: 'bool',
+            default: true,
+        });
+        core.settings.define({
             key: 'live.titleMarket',
             section: 'Market',
             label: 'Market overview in the tab title',
@@ -848,7 +856,8 @@ export const liveUpdatesModule = {
                 const res = snap.resources.find((r) => r.id === t.resourceId);
                 next[key] = { ...summary, name: res ? res.name : (t.name || `resource ${t.resourceId}`), at: Date.now() };
                 const p = prev[key];
-                if (p && (summary.count > p.count || summary.amount > p.amount)) {
+                if (core.settings.get('market.desktopNotifications')
+                    && p && (summary.count > p.count || summary.amount > p.amount)) {
                     notify(
                         `Alliance/friend ${t.side === 'sell' ? 'sell' : 'buy'} orders in ${next[key].name}: ` +
                         `${summary.count} (${core.commas(summary.amount)})`,

@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { createLiveTab, LIVE_LEADER_TTL } from '../src/lib/live-tab.js';
 import { deliverNotification, requestNotificationPermission } from '../src/lib/desktop-notifications.js';
 import { liveUpdatesModule } from '../src/ui/liveupdates.js';
+import { marketAdapter } from '../src/adapters/market.js';
 
 function tabs() {
     const store = new Map();
@@ -240,4 +241,50 @@ test('test notification bypasses focus and the automatic-notification preference
     await h.definitions.get('live.testNotification').handler();
     assert.equal(sent, 1);
     assert.equal(JSON.parse(h.store.get('clopx.live.notification')).state, 'requested');
+});
+
+test('market notification toggle leaves polling/cache active and respects the global toggle', async t => {
+    const h = moduleHarness(t);
+    const setting = h.definitions.get('market.desktopNotifications');
+    assert.equal(setting.section, 'Market');
+    assert.equal(setting.default, true);
+    t.mock.method(console, 'warn', () => {}); // This minimal Overview has no Resources table.
+    let sent = 0, loads = 0, amount = 10;
+    class Notifications {
+        static permission = 'granted';
+        constructor() { sent++; }
+    }
+    const previous = Object.getOwnPropertyDescriptor(globalThis, 'Notification');
+    Object.defineProperty(globalThis, 'Notification', { configurable: true, value: Notifications });
+    t.after(() => previous ? Object.defineProperty(globalThis, 'Notification', previous) : delete globalThis.Notification);
+    h.store.set('clopx.market.favs.sell.resources', JSON.stringify([{ id: '1', name: 'Apples' }]));
+    h.store.set('clopx.market.notify', JSON.stringify({ 'resources|sell|1': true }));
+    h.store.set('clopx.live.friendly', JSON.stringify({ 'resources|sell|1': { count: 0, amount: 0 } }));
+    t.mock.method(marketAdapter(h.core, 'sell', ''), 'load', async () => {
+        loads++;
+        return { resources: [{ id: '1', name: 'Apples' }], orders: [{ relation: 'alliance', amount }] };
+    });
+    async function poll() {
+        h.advance(60001);
+        h.event('resume');
+        h.requests.at(-1)(h.doc);
+        await new Promise(resolve => setImmediate(resolve));
+    }
+    h.values.set('market.desktopNotifications', false);
+    await poll();
+    assert.equal(loads, 1);
+    assert.equal(sent, 0);
+    assert.equal(JSON.parse(h.store.get('clopx.live.friendly'))['resources|sell|1'].amount, 10);
+    assert.ok(h.emitted.some(([name]) => name === 'market:friendlyCache'));
+    h.values.set('market.desktopNotifications', true);
+    await poll();
+    assert.equal(sent, 0, 'enabling does not replay orders already observed while muted');
+    amount = 20;
+    await poll();
+    assert.equal(sent, 1);
+    h.values.set('live.notify', false);
+    amount = 30;
+    await poll();
+    assert.equal(sent, 1, 'the global switch still suppresses delivery');
+    assert.equal(loads, 4);
 });
