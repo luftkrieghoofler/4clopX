@@ -6,18 +6,24 @@
 //     any mode; see marketNotifyEnabled), via the market sweep, and
 //   * low resource and satisfaction buffers from the Overview page.
 //
-// CROSS-TAB DESIGN: exactly one tab — the elected leader — polls; all
+// CROSS-TAB DESIGN: one elected leader polls; all
 // state is shared through localStorage and `storage` events:
 //   clopx.live.leader    {id, at}         heartbeat of the leader tab
 //   clopx.live.nextAt    number           when the next poll is due
 //   clopx.live.pollNow   number           "poll immediately" signal
-//   clopx.live.seen      number           last time any tab was visible
+//   clopx.live.focus     {id, at}         currently focused game tab
 //   clopx.live.badges    {at, values, tickSeconds} last header snapshot
 //   clopx.live.overview  {at, ...}        last Overview safety values
 //   clopx.live.polled    number           a poll cycle finished (signal)
+//   clopx.live.success   number           last fully successful poll
+//   clopx.live.error     {at, detail}     latest poll failure, cleared on success
+//   clopx.live.notification {at, state, detail} last delivery attempt
 //   clopx.live.friendly  {key: {...}}     the friendly-order cache, keyed
 //                                          "mode|side|resourceId" (mode ''
 //                                          is stored as "resources")
+// A takeover can overlap an in-flight request: localStorage is not an atomic
+// lock. Recheck ownership before fetching and after awaits so a superseded
+// tab does not publish stale results or schedule another cycle.
 //
 // The friendly cache persists across navigations, so page loads neither
 // re-run the sweep nor reset notification baselines; the poll timer also
@@ -46,6 +52,8 @@ import {
     readCachedResourceStats, RESOURCE_STATS_CACHE_KEY, resourceBufferSummary,
 } from '../adapters/overview.js';
 import { readFavourites } from '../lib/favourites.js';
+import { createLiveTab } from '../lib/live-tab.js';
+import { deliverNotification, requestNotificationPermission } from '../lib/desktop-notifications.js';
 
 // Header badges that raise desktop notifications.  Polls are deliberately
 // excluded from notifications AND the tab title (never urgent); their
@@ -68,9 +76,12 @@ const K = {
     leader: 'clopx.live.leader',
     nextAt: 'clopx.live.nextAt',
     pollNow: 'clopx.live.pollNow',
-    seen: 'clopx.live.seen',
+    focus: 'clopx.live.focus',
+    error: 'clopx.live.error',
+    notification: 'clopx.live.notification',
     badges: 'clopx.live.badges',
     polled: 'clopx.live.polled',
+    success: 'clopx.live.success',
     friendly: 'clopx.live.friendly',
 };
 
@@ -283,8 +294,8 @@ export const liveUpdatesModule = {
         core.settings.define({
             key: 'live.intervalFocused',
             section: 'Live updates',
-            label: 'Live update interval while a tab is visible (seconds)',
-            description: 'How often to check while some game tab is being looked at.',
+            label: 'Live update interval while a tab is focused (seconds)',
+            description: 'How often to check while a game tab has window focus.',
             type: 'number',
             default: 60,
             onChange: () => core.events.emit('live:intervalChanged', {}),
@@ -293,7 +304,7 @@ export const liveUpdatesModule = {
             key: 'live.intervalBlurred',
             section: 'Live updates',
             label: 'Live update interval in the background (seconds)',
-            description: 'How often to check while no game tab is visible.',
+            description: 'Requested interval while no game tab is focused. Browsers may delay background checks, especially on mobile; notifications are best-effort.',
             type: 'number',
             default: 60,
             onChange: () => core.events.emit('live:intervalChanged', {}),
@@ -311,9 +322,24 @@ export const liveUpdatesModule = {
             onChange: (on, { source } = {}) => {
                 if (source === 'local' && on
                     && typeof Notification !== 'undefined' && Notification.permission === 'default') {
-                    Notification.requestPermission();
+                    requestNotificationPermission().catch((e) => console.warn('[4clopX] notification permission:', e));
                 }
             },
+        });
+        core.settings.define({
+            key: 'live.testNotification', section: 'Live updates', type: 'button',
+            label: 'Test notification',
+            description: 'Send a test even while this tab is focused or automatic notifications are disabled. If none appears, check browser/site permissions and system Do Not Disturb.',
+            handler: async () => {
+                await requestNotificationPermission();
+                if (!core.liveUpdates?.testNotification()) throw new Error('Could not send the notification; check live-update status.');
+            },
+        });
+        core.settings.define({
+            key: 'live.status', section: 'Live updates', type: 'button', feedback: false,
+            label: 'Check live-update status',
+            description: 'Show the last successful background check and notification delivery attempt.',
+            handler: () => core.liveUpdates?.showStatus(),
         });
         core.settings.define({
             key: 'overview.bufferWarningTicks',
@@ -377,13 +403,18 @@ export const liveUpdatesModule = {
         const el = core.el.bind(core);
         const enabled = core.settings.get('live.enabled');
         const TAB_ID = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
-        const LEADER_TTL = 35000;
         const ENSURE_EVERY = 10000;
+        const tab = createLiveTab({
+            id: TAB_ID,
+            read: (key) => jget(K[key], null),
+            write: (key, value) => jset(K[key], value),
+            remove: (key) => { try { localStorage.removeItem(K[key]); } catch (e) { /* unavailable storage */ } },
+            focused: () => !document.hidden && document.hasFocus(),
+        });
 
         let leading = false;
         let polling = false;
         let stopped = false;
-        let pendingPoll = false;     // poll requested before this tab led
         let pollTimer = null;
         let currentView = null;      // {mode, side, resourceId, at} open in THIS tab's marketplace
         const loadedAt = (typeof performance !== 'undefined' && performance.timeOrigin) || Date.now();
@@ -613,20 +644,23 @@ export const liveUpdatesModule = {
 
         /* ---------------- notifications ---------------- */
 
-        const stampSeen = () => { if (!document.hidden) jset(K.seen, Date.now()); };
-        const anyoneLooking = () =>
-            (!document.hidden && document.hasFocus()) || Date.now() - (jget(K.seen, 0) || 0) < 25000;
+        const anyoneLooking = tab.anyoneFocused;
+
+        function sendNotification(body, href, tag) {
+            return deliverNotification({
+                body, href, tag,
+                record: (result) => jset(K.notification, result),
+                onClick: (notification, destination) => {
+                    try { window.focus(); if (destination) location.assign(destination); notification.close(); }
+                    catch (e) { console.warn('[4clopX] notification navigation failed:', e); }
+                },
+            });
+        }
 
         function notify(body, href, tag) {
             if (!core.settings.get('live.notify')) return;
             if (anyoneLooking()) return;
-            if (typeof Notification === 'undefined' || Notification.permission !== 'granted') return;
-            try {
-                const n = new Notification('CLOP', { body, tag: `clopx-${tag}` });
-                n.onclick = () => {
-                    try { window.focus(); if (href) location.assign(href); n.close(); } catch (e) { /* ignore */ }
-                };
-            } catch (e) { /* notification construction can throw on some platforms */ }
+            sendNotification(body, href, tag);
         }
 
         /* ---------------- session recovery ---------------- */
@@ -653,16 +687,19 @@ export const liveUpdatesModule = {
         /* ---------------- the poll ---------------- */
 
         async function poll() {
-            if (polling || stopped) return;
+            // A delayed callback can run after another tab has taken over.
+            if (polling || stopped || (enabled && !isLeader())) return;
             polling = true;
             try {
                 let doc = await core.http.getDoc(HEADER_PROBE_PAGE);
+                if (enabled && !isLeader()) return;
                 if (!isLoggedInDoc(doc)) {
                     if (!(await tryRelogin())) {
                         stop('session expired — reload the page to log in');
                         return;
                     }
                     doc = await core.http.getDoc(HEADER_PROBE_PAGE);
+                    if (enabled && !isLeader()) return;
                 }
                 const values = headerBadges(doc);
                 for (const c of applyHeaderBadges(values)) {
@@ -679,6 +716,7 @@ export const liveUpdatesModule = {
                 // copy, keeping form tokens out of shared storage.
                 core.events.emit('overview:document', { document: doc });
                 let resourceStats = null;
+                let overviewError = null;
                 try {
                     const previousStats = readCachedResourceStats();
                     resourceStats = parseResourceStats(doc);
@@ -708,14 +746,22 @@ export const liveUpdatesModule = {
                     // Header and market refreshes remain useful if a host
                     // changes the Overview table markup unexpectedly.
                     console.warn('[4clopX] Overview safety refresh failed:', e);
+                    overviewError = e;
                 }
                 await sweepFavourites(resourceStats);
+                if (enabled && !isLeader()) return;
                 // Cycle done — marketplace tabs (this one directly, others
                 // via the K.polled storage event) refresh their open market.
                 jset(K.polled, Date.now());
+                if (overviewError) jset(K.error, { at: Date.now(), detail: overviewError.message || String(overviewError) });
+                else {
+                    jset(K.success, Date.now());
+                    jset(K.error, null);
+                }
                 core.events.emit('live:polled', { remote: false });
             } catch (e) {
                 console.warn('[4clopX] live update failed:', e);
+                if (!enabled || isLeader()) jset(K.error, { at: Date.now(), detail: e.message || String(e) });
             } finally {
                 polling = false;
                 if (!stopped) schedule();
@@ -768,6 +814,7 @@ export const liveUpdatesModule = {
             }
 
             for (const t of targets) {
+                if (enabled && !isLeader()) return;
                 const key = `${t.mode || 'resources'}|${t.side}|${t.resourceId}`;
                 if (viewIsFresh(t.mode, t.side, t.resourceId)) {
                     // Its cache entry (when cacheable) is already fresh and
@@ -783,6 +830,7 @@ export const liveUpdatesModule = {
                     console.warn('[4clopX] open-market refresh failed:', e);
                     continue;
                 }
+                if (enabled && !isLeader()) return;
                 const summary = summarizeFriendly(snap.orders,
                     targetIsActionable(t, snap, resourceStats, prev[key]));
                 // snap rides along so a marketplace view of this market in
@@ -804,35 +852,25 @@ export const liveUpdatesModule = {
                 }
             }
 
+            if (enabled && !isLeader()) return;
             jset(K.friendly, next);
             core.events.emit('market:friendlyCache', {});
         }
 
         /* ---------------- leader election ---------------- */
 
-        const leaderRec = () => jget(K.leader, null);
-        const isLeader = () => {
-            const r = leaderRec();
-            return !!r && r.id === TAB_ID;
-        };
+        const isLeader = tab.isLeader;
 
         function startLeading() {
-            if (leading || stopped || !enabled) return;
+            if (leading || stopped || !enabled || !isLeader()) return;
             leading = true;
             clearTimeout(pollTimer);
-            if (pendingPoll) {
-                pendingPoll = false;
-                jset(K.nextAt, Date.now());
-                poll();
-                return;
-            }
             // Honor the standing schedule — taking over leadership (or
             // loading a page) is not a reason to poll early.
             const storedNext = jget(K.nextAt, 0) || 0;
             if (storedNext) {
-                const delay = Math.max(2000, storedNext - Date.now());
-                jset(K.nextAt, Date.now() + delay);
-                pollTimer = setTimeout(poll, delay);
+                if (storedNext <= Date.now()) poll();
+                else pollTimer = setTimeout(poll, storedNext - Date.now());
             } else {
                 schedule();
             }
@@ -845,39 +883,19 @@ export const liveUpdatesModule = {
 
         function ensureLeader() {
             if (stopped || !enabled) return;
-            const rec = leaderRec();
-            if (rec && rec.id === TAB_ID) {
-                jset(K.leader, { id: TAB_ID, at: Date.now() });     // heartbeat
-                if (!leading) startLeading();
-                return;
-            }
-            if (!rec || Date.now() - rec.at > LEADER_TTL) {
-                jset(K.leader, { id: TAB_ID, at: Date.now() });     // claim
-                // Verify after a beat so simultaneous claimants resolve to
-                // whoever wrote last.
-                setTimeout(() => { if (isLeader()) startLeading(); }, 300 + Math.floor(Math.random() * 400));
-            } else if (leading) {
-                stopLeading();                                      // superseded
-            }
+            if (tab.maintain()) startLeading();
+            else stopLeading();
         }
 
         function requestPollNow() {
             if (stopped) return;
             if (!enabled) { poll(); return; }         // one-shot, no scheduling
+            ensureLeader();
             if (isLeader()) {
-                // Claimed but not yet leading (verify pending): lead now so
-                // poll() reschedules properly afterwards.
-                if (!leading) { pendingPoll = true; startLeading(); return; }
                 clearTimeout(pollTimer);
                 poll();
-                return;
-            }
-            const rec = leaderRec();
-            if (rec && Date.now() - rec.at < LEADER_TTL) {
-                jset(K.pollNow, Date.now());          // ask the live leader
             } else {
-                pendingPoll = true;                   // claim and poll ourselves
-                ensureLeader();
+                jset(K.pollNow, Date.now());          // ask the live leader
             }
         }
 
@@ -890,7 +908,7 @@ export const liveUpdatesModule = {
         }
 
         function schedule() {
-            if (!leading || !enabled || stopped) return;
+            if (!leading || !enabled || stopped || !isLeader()) return;
             clearTimeout(pollTimer);
             const ms = intervalMs();
             jset(K.nextAt, Date.now() + ms);
@@ -899,11 +917,11 @@ export const liveUpdatesModule = {
 
         // Pull the next poll closer when attention warrants it — never push
         // it out.  Runs when this tab's visibility changes AND when any
-        // other tab reports becoming visible (its K.seen stamp), so a
+        // other tab reports gaining focus, so a
         // hidden leader tightens the cadence for a newly-visible follower
         // instead of letting the long countdown run its course.
         function clampSchedule() {
-            if (!leading || stopped || polling) return;
+            if (!leading || stopped || polling || !isLeader()) return;
             const now = Date.now();
             const nextAt = jget(K.nextAt, 0) || 0;
             if (nextAt && nextAt <= now) {
@@ -922,12 +940,35 @@ export const liveUpdatesModule = {
         function stop(reason) {
             stopped = true;
             clearTimeout(pollTimer);
-            if (isLeader()) { try { localStorage.removeItem(K.leader); } catch (e) { /* ignore */ } }
+            tab.release();
+            jset(K.error, { at: Date.now(), detail: reason });
             cdText.textContent = '✖';
             cdText.className = 'text-danger';
             cdLi.querySelector('a').title = `Live updates stopped: ${reason}`;
             console.warn(`[4clopX] live updates stopped: ${reason}`);
         }
+
+        const timestamp = (at) => at ? new Date(at).toLocaleString() : 'None recorded';
+        const lastPollStatus = () => `Last successful full check: ${timestamp(jget(K.success, 0))}`;
+        core.liveUpdates = {
+            testNotification: () => sendNotification('Test notification from 4clopX.', null, 'test'),
+            showStatus: () => {
+                const error = jget(K.error, null);
+                const notification = jget(K.notification, null);
+                return core.confirm({
+                    title: 'Live-update status', alertOnly: true, dismissLabel: 'OK',
+                    body: [
+                        `Automatic polling in this tab: ${stopped ? 'stopped' : enabled ? 'enabled' : 'disabled'}.`,
+                        lastPollStatus(),
+                        `Last Overview/header fetch: ${timestamp(jget(K.badges, null)?.at)}`,
+                        `Notification permission: ${typeof Notification === 'undefined' ? 'unavailable' : Notification.permission}`,
+                        `Last polling error: ${error ? `${timestamp(error.at)} — ${error.detail}` : 'None recorded'}`,
+                        `Last notification attempt: ${notification ? `${timestamp(notification.at)} — ${notification.state}: ${notification.detail}` : 'None recorded'}`,
+                        'Status is shared between game tabs. Background checks can be delayed or suspended, especially on mobile. A notification accepted by the browser may still be hidden by system settings.',
+                    ].map((text) => el('p', {}, [text])),
+                });
+            },
+        };
 
         const cdText = el('span', { class: 'text-info' }, ['—']);
         const cdLi = el('li', { class: 'clop-live-countdown' }, [el('a', {
@@ -1049,13 +1090,12 @@ export const liveUpdatesModule = {
                 // UI.  The toggling tab does any seeding fetch itself; its
                 // cache write arrives via the K.friendly event above.
                 core.events.emit('market:friendlyCache', {});
-            } else if (ev.key === K.seen) {
+            } else if (ev.key === K.focus) {
                 clampSchedule();
             } else if (ev.key === K.pollNow) {
                 if (isLeader() && enabled) { clearTimeout(pollTimer); poll(); }
             } else if (ev.key === K.leader) {
-                const rec = leaderRec();
-                if (leading && rec && rec.id !== TAB_ID && Date.now() - rec.at < LEADER_TTL) stopLeading();
+                if (leading && !isLeader()) stopLeading();
             }
         });
 
@@ -1064,7 +1104,9 @@ export const liveUpdatesModule = {
         // Browsers only allow the permission prompt on a user gesture.
         if (core.settings.get('live.notify')
             && typeof Notification !== 'undefined' && Notification.permission === 'default') {
-            document.addEventListener('click', () => Notification.requestPermission(), { once: true, capture: true });
+            document.addEventListener('click', () => {
+                requestNotificationPermission().catch((e) => console.warn('[4clopX] notification permission:', e));
+            }, { once: true, capture: true });
         }
 
         const navRight = document.querySelector('nav.navbar ul.navbar-right');
@@ -1099,24 +1141,33 @@ export const liveUpdatesModule = {
 
         setInterval(() => {
             if (stopped) return;
+            cdLi.querySelector('a').title = `${lastPollStatus()}. Click to update now. Background checks are best-effort.`;
             if (polling) { cdText.textContent = '…'; return; }
             const nextAt = jget(K.nextAt, 0) || 0;
             const s = Math.max(0, Math.round((nextAt - Date.now()) / 1000));
             cdText.textContent = `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
         }, 1000);
 
-        stampSeen();
-        setInterval(stampSeen, ENSURE_EVERY);
-        document.addEventListener('visibilitychange', () => {
-            stampSeen();
+        function reconcile() {
+            if (stopped) return;
+            tab.stampFocus();
+            ensureLeader();
             clampSchedule();
-        });
+        }
+        function suspend() {
+            stopLeading();
+            tab.release();
+        }
+        document.addEventListener('visibilitychange', reconcile);
+        window.addEventListener('focus', reconcile);
+        window.addEventListener('blur', reconcile);
+        window.addEventListener('pageshow', reconcile);
+        window.addEventListener('online', reconcile);
+        document.addEventListener('resume', reconcile);
+        document.addEventListener('freeze', suspend);
+        window.addEventListener('pagehide', suspend);
 
-        window.addEventListener('pagehide', () => {
-            if (isLeader()) { try { localStorage.removeItem(K.leader); } catch (e) { /* ignore */ } }
-        });
-
-        setInterval(ensureLeader, ENSURE_EVERY);
-        ensureLeader();
+        setInterval(reconcile, ENSURE_EVERY);
+        reconcile();
     },
 };

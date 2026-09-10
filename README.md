@@ -22,6 +22,8 @@ To build from source instead, see [DEVELOPMENT.md](DEVELOPMENT.md).
 ### Live updates and notifications
 Every 60s by default, the scripts checks the stock notifications (messages, alliance, incoming attacks etc.), watched markets, and resource usage; new events are show in the tab title and support desktop notifications. Click on the the timer in the navbar to refresh immediately.
 
+Browser-based desktop notifications are best-effort, *especially on mobile*. Reliable mobile notifications would require push support from the server.
+
 If the game session expires in the background, auto-login is required to keep watching (see below). If autologin is disabled, don't rely on notifications, since sessions are relatively short-lived.
 
 ### Auto-login
