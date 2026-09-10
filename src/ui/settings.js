@@ -79,6 +79,7 @@ export const settingsModule = {
         let overlay = null;
         const settingRefreshers = new Map();
         const dependencyRefreshers = [];
+        const settingCleanups = [];
         let marketEditor = null;
         let shortcutEditor = null;
         let sectionView = null;
@@ -135,6 +136,7 @@ export const settingsModule = {
             sectionView = null;
             settingRefreshers.clear();
             dependencyRefreshers.length = 0;
+            for (const cleanup of settingCleanups.splice(0)) cleanup();
             if (marketEditor) marketEditor.destroy();
             marketEditor = null;
             if (shortcutEditor) shortcutEditor.destroy();
@@ -142,6 +144,7 @@ export const settingsModule = {
             document.removeEventListener('keydown', onKey);
             if (returnFocus?.isConnected) returnFocus.focus();
             returnFocus = null;
+            core.events.emit('settings:visibility', { open: false });
         }
 
         function openPanel(section) {
@@ -164,7 +167,10 @@ export const settingsModule = {
                                 panel.appendChild(el('div', { class: 'clop-setting-group' }, [def.section]));
                                 previousGroup = def.section;
                             }
-                            panel.appendChild(settingRow(def));
+                            const row = settingRow(def);
+                            panel.appendChild(row);
+                            const cleanup = def.mount?.(row);
+                            if (cleanup) settingCleanups.push(cleanup);
                         }
                         if (label === 'Market favourites') {
                             marketEditor = marketEditorSection();
@@ -198,6 +204,7 @@ export const settingsModule = {
                 ]),
             ]);
             document.body.appendChild(overlay);
+            core.events.emit('settings:visibility', { open: true });
             const panel = overlay.querySelector('.clop-settings-panel');
             const panelStyle = window.getComputedStyle(panel);
             panel.style.setProperty('--clop-settings-background', panelStyle.backgroundColor);

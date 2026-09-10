@@ -4,6 +4,7 @@ export async function requestNotificationPermission(NotificationAPI = globalThis
     if (!NotificationAPI) throw new Error('This browser does not expose desktop notifications.');
     const permission = NotificationAPI.permission === 'default'
         ? await NotificationAPI.requestPermission() : NotificationAPI.permission;
+    if (permission === 'default') throw new Error('Permission wasn’t granted. You can try again, or disable 4clopX notifications.');
     if (permission !== 'granted') throw new Error('Notifications are blocked. Allow them in the site/browser permissions.');
 }
 

@@ -123,6 +123,8 @@ export const core = {
         //   min, max, step,        // optional number-input constraints
         //   options,               // choice: [{value, label, example?}]
         //   handler,               // button: invoked by the settings UI
+        //   mount(row),            // optional inline content; returns a
+        //                          //   cleanup called when settings closes
         //   feedback: false,       // button: do not replace its label with
         //                          //   transient progress/completion text
         //   parent,                // optional bool-setting key: indent this

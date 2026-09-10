@@ -54,6 +54,7 @@ import {
 import { readFavourites } from '../lib/favourites.js';
 import { createLiveTab } from '../lib/live-tab.js';
 import { deliverNotification, requestNotificationPermission } from '../lib/desktop-notifications.js';
+import { createNotificationPermissionNotice } from './notification-permission.js';
 
 // Header badges that raise desktop notifications.  Polls are deliberately
 // excluded from notifications AND the tab title (never urgent); their
@@ -322,16 +323,18 @@ export const liveUpdatesModule = {
             onChange: (on, { source } = {}) => {
                 if (source === 'local' && on
                     && typeof Notification !== 'undefined' && Notification.permission === 'default') {
-                    requestNotificationPermission().catch((e) => console.warn('[4clopX] notification permission:', e));
+                    (core.notificationPermission?.request || requestNotificationPermission)()
+                        .catch((e) => console.warn('[4clopX] notification permission:', e));
                 }
             },
+            mount: (host) => core.notificationPermission?.mount(host),
         });
         core.settings.define({
             key: 'live.testNotification', section: 'Live updates', type: 'button',
             label: 'Test notification',
             description: 'Send a test even while this tab is focused or automatic notifications are disabled. If none appears, check browser/site permissions and system Do Not Disturb.',
             handler: async () => {
-                await requestNotificationPermission();
+                await (core.notificationPermission?.request || requestNotificationPermission)();
                 if (!core.liveUpdates?.testNotification()) throw new Error('Could not send the notification; check live-update status.');
             },
         });
@@ -399,6 +402,8 @@ export const liveUpdatesModule = {
 
     init(core) {
         if (!isLoggedInDoc(document)) return;
+
+        core.notificationPermission = createNotificationPermissionNotice(core);
 
         const el = core.el.bind(core);
         const enabled = core.settings.get('live.enabled');
@@ -1100,14 +1105,6 @@ export const liveUpdatesModule = {
         });
 
         if (!enabled) return;
-
-        // Browsers only allow the permission prompt on a user gesture.
-        if (core.settings.get('live.notify')
-            && typeof Notification !== 'undefined' && Notification.permission === 'default') {
-            document.addEventListener('click', () => {
-                requestNotificationPermission().catch((e) => console.warn('[4clopX] notification permission:', e));
-            }, { once: true, capture: true });
-        }
 
         const navRight = document.querySelector('nav.navbar ul.navbar-right');
         let countdownHome = null;
