@@ -312,9 +312,9 @@ export const liveUpdatesModule = {
         });
         core.settings.define({
             key: 'live.notify',
-            section: 'Live updates',
+            section: 'General',
             label: 'Desktop notifications while no tab is focused',
-            description: 'Notify about new messages, alliance messages, deals, incoming attacks, actionable alliance orders in favourite markets, and Overview values newly reaching a critical buffer.',
+            description: 'Notify about new messages, alliance messages, deals, incoming attacks, actionable alliance orders in favourite markets, and Overview values newly reaching a critical buffer. On mobile, notifications can be unreliable because the browser or operating system may pause background checks.',
             type: 'bool',
             default: true,
             // The settings-UI click is a user gesture, which is exactly
@@ -330,9 +330,9 @@ export const liveUpdatesModule = {
             mount: (host) => core.notificationPermission?.mount(host),
         });
         core.settings.define({
-            key: 'live.testNotification', section: 'Live updates', type: 'button',
+            key: 'live.testNotification', section: 'General', type: 'button',
             label: 'Test notification',
-            description: 'Send a test even while this tab is focused or automatic notifications are disabled. If none appears, check browser/site permissions and system Do Not Disturb.',
+            description: 'Send a test notification. If none appears, check browser/site permissions and system Do Not Disturb.',
             handler: async () => {
                 await (core.notificationPermission?.request || requestNotificationPermission)();
                 if (!core.liveUpdates?.testNotification()) throw new Error('Could not send the notification; check live-update status.');

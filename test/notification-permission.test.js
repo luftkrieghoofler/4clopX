@@ -3,6 +3,17 @@ import assert from 'node:assert/strict';
 import { createNotificationPermissionNotice } from '../src/ui/notification-permission.js';
 import { liveUpdatesModule } from '../src/ui/liveupdates.js';
 
+test('notification controls live in General with a mobile caveat; polling controls stay in Live updates', () => {
+    const definitions = new Map();
+    liveUpdatesModule.settings({ settings: { define: def => definitions.set(def.key, def) } });
+    assert.equal(definitions.get('live.notify').section, 'General');
+    assert.equal(definitions.get('live.testNotification').section, 'General');
+    assert.match(definitions.get('live.notify').description, /On mobile, notifications can be unreliable/);
+    for (const key of ['live.enabled', 'live.intervalFocused', 'live.intervalBlurred', 'live.status']) {
+        assert.equal(definitions.get(key).section, 'Live updates');
+    }
+});
+
 class Node {
     constructor(attrs = {}, children = []) {
         Object.assign(this, attrs);
