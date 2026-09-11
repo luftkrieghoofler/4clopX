@@ -14,7 +14,11 @@ export function warningGroup(core, sections) {
 }
 
 export function rateRiskListItem(core, name, before, after, note = '') {
-    const signed = (value) => value > 0 ? `+${core.commas(value)}` : core.commas(value);
+    // Army upkeep is averaged over six ticks, so rates may be fractional.
+    const signed = (value) => {
+        const rounded = Math.round(value * 100) / 100;
+        return rounded > 0 ? `+${core.commas(rounded)}` : core.commas(rounded);
+    };
     return core.el('li', {}, [
         core.el('strong', {}, [`${name}:`]),
         ` net/tick decreases from ${signed(before)} to `,

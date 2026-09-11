@@ -43,6 +43,10 @@ Most nation expansions, if done in the right build order, can be completed witho
 
 Also shows a special reminder for Burn Oil to prevent the classic mistake of burning 5x too much.
 
+Create Forces, Create Weapons/Armor, and Equip Forces run in place, with the usual success toasts and error dialogs. Force creation checks bits, full wartick upkeep reserves, average resource use over six ticks, and the army-size satisfaction penalty. Equipment creation uses the same safety checks as Actions.
+
+Equip Forces disables equipment you cannot supply in sufficient quantity. Inventory updates come from the shared Overview refresh; open dropdowns stay stable until you leave them. If your selected equipment becomes unavailable, its submit button is disabled too.
+
 ### Marketplace
 The marketplace UI is completely overhauled:
  * Sell orders and buy orders become one page with two tabs, and every resource becomes a tab, making navigation much, much easier.

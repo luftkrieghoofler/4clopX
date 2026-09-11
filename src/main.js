@@ -6,6 +6,7 @@ import { shortcutsModule } from './ui/shortcuts.js';
 import { overviewModule } from './ui/overview.js';
 import { marketplaceModule } from './ui/marketplace.js';
 import { actionsModule } from './ui/actions.js';
+import { militaryModule } from './ui/military.js';
 import { dealsModule } from './ui/deals.js';
 import { liveUpdatesModule } from './ui/liveupdates.js';
 import { settingsModule } from './ui/settings.js';
@@ -25,6 +26,7 @@ core.register(overviewModule);
 core.register(liveUpdatesModule);
 core.register(marketplaceModule);
 core.register(actionsModule);
+core.register(militaryModule);
 core.register(dealsModule);
 core.register(settingsModule);
 // Keep core private: exporting it to the page also exposes its privileged

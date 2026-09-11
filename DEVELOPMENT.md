@@ -57,6 +57,8 @@ Safety prompts use the shared Promise-based `core.confirm({ title, body, confirm
 
 `src/data/actions.generated.js` pairs each action's mechanics with the normalized description from the same CLOP backend snapshot. At runtime, action safety uses those mechanics only when the live name and description still match exactly (apart from whitespace). A mismatch is deliberately treated as incompatible rather than guessing from prose.
 
+Military safety reads the live force price/upkeep table and the equipment recipes' database-generated item lines. Unrecognised formats require an explicit unprotected-action confirmation. The remaining military rules in `src/lib/military-safety.js` follow upstream `backend_createforces.php` and `cron/frequent.php`: mercenary multiplier `3 - relation/1000`, military satisfaction loss `max(0, ceil((total size - 20)/2))` each normal tick, and resource payments at 00:00/12:00 UTC (six normal ticks). These rules are not exposed as live page descriptions; a host changing them requires a script update. The wartick countdown uses the device's UTC clock. Total owned army size comes from Group Forces, including deployed/in-transit units, not the Overview's local defenders.
+
 The initial snapshot can be regenerated from a CLOP SQL dump with:
 
 ```sh

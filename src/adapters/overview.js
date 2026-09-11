@@ -75,6 +75,8 @@ export function nationStatusFromDocument(doc) {
             const label = cells[0].textContent.trim();
             const value = cells[1].textContent.trim();
             if (label === 'Government Type') status.government = value;
+            if (label === 'Relationship with Solar Empire') status.seRelation = cellNumber(value);
+            if (label === 'Relationship with New Lunar Republic') status.nlrRelation = cellNumber(value);
             if (label === 'Funds') {
                 const match = value.match(/^([+-]?(?:\d{1,3}(?:,\d{3})+|\d+))\s+bits$/i);
                 const funds = match ? Number(match[1].replace(/,/g, '')) : NaN;
@@ -187,6 +189,7 @@ export function parseResourceStats(doc) {
             // simply don't match anything.
             for (const m of c.textContent.matchAll(/([\d,]+)\s+([A-Za-z]+)/g)) {
                 const key = m[2].toLowerCase();
+                if (!['apples', 'gems', 'coffee', 'gasoline'].includes(key)) continue;
                 if (!byName[key]) {
                     byName[key] = {
                         name: `${m[2][0].toUpperCase()}${m[2].slice(1).toLowerCase()}`,
@@ -253,6 +256,12 @@ function snapshotResourceStats(stats, at = Date.now()) {
         satisfaction: statusNumber(stats && stats.satisfaction),
         satisfactionPerTick: statusNumber(stats && stats.satisfactionPerTick),
         government: stats && stats.government ? String(stats.government) : null,
+        ...Object.fromEntries(['weaponsByName', 'armorByName'].map((key) => [key,
+            stats?.[key] && typeof stats[key] === 'object'
+                ? Object.fromEntries(Object.entries(stats[key]).map(([name, item]) => [name, {
+                    name: String(item.name), qty: statusNumber(item.qty),
+                }])) : null,
+        ])),
     };
 }
 

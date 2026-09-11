@@ -1,9 +1,6 @@
 import {
     actionsFromDocument, actionFormsFromDocument, actionTimesValue, phpInteger, submittedAction,
 } from '../adapters/actions.js';
-import {
-    formatTickDuration, tickIsCritical, tickIsImminent, tickSecondsFromDocument,
-} from '../adapters/header.js';
 import { fetchResourceStats } from '../adapters/overview.js';
 import { ACTION_CATALOG, BUILDING_EFFECTS, BUILDING_UPKEEP } from '../data/actions.generated.js';
 import {
@@ -11,9 +8,8 @@ import {
     projectActionRisks, projectActionSatisfaction, SATISFACTION_SAFETY_MODES,
 } from '../lib/action-safety.js';
 import { protectedReserve, reserveSafeMax } from '../lib/upkeep-safety.js';
-import { upkeepWarningSection } from './upkeep-warning.js';
-import { rateRiskListItem, warningGroup, warningSection } from './warning-content.js';
-import { affordabilityDialogOptions } from './affordability-warning.js';
+import { createActionSafetyDialogs } from './action-warning.js';
+export { actionWarningGroup } from './action-warning.js';
 import {
     executeDynamicAction, isDynamicActionSubmission, prepareActionQuantity, replaceActionContent,
 } from './action-submission.js';
@@ -24,38 +20,11 @@ const SATISFACTION_TREND_SETTING_KEY = 'actions.confirmNegativeSatisfactionRate'
 export const SATISFACTION_SAFETY_MODE_SETTING_KEY = 'actions.satisfactionSafetyMode';
 const RESOURCE_TREND_SETTING_KEY = 'actions.confirmNegativeResourceRates';
 const AUTHOR_URL = 'viewuser.php?user_id=64';
-const IMMINENT_TICK_SECONDS = 10 * 60;
-const CRITICAL_TICK_SECONDS = 90;
 const BURN_OIL_ACTION_ID = '4';
 const BURN_OIL_UNITS_PER_ACTION = 5;
 const BURN_OIL_SAT_PER_ACTION = 5;
 const MAX_DISTRIBUTION_ACTION_IDS = new Set(['8', '9']);
 
-export function actionWarningGroup(core, {
-    resourceRateRisks = [], risks = [], satisfactionTrend = null, burnOilReminder = false,
-}) {
-    const sections = [];
-    if (resourceRateRisks.length) {
-        sections.push(warningSection(core, 'Domestic production deficit',
-            resourceRateRisks.map((risk) => rateRiskListItem(
-                core, risk.name, risk.netBefore, risk.netAfter))));
-    }
-    sections.push(upkeepWarningSection(core, risks));
-    if (satisfactionTrend) {
-        sections.push(warningSection(core, 'Satisfaction declining', [
-            rateRiskListItem(core, 'Satisfaction', satisfactionTrend.perTickBefore,
-                satisfactionTrend.perTickAfter,
-                satisfactionTrend.satisfactionMode === SATISFACTION_SAFETY_MODES.MAXIMUM
-                    ? 'at cap' : 'decay ignored'),
-        ]));
-    }
-    if (burnOilReminder) {
-        sections.push(warningSection(core, 'Remember: 1 action burns 5 oil', [
-            core.el('li', {}, ['Divide the oil you intend to burn by 5 before entering the action count.']),
-        ]));
-    }
-    return warningGroup(core, sections);
-}
 
 export function burnOilOutcome(times, satisfaction) {
     if (!Number.isSafeInteger(times) || times < 1 || !Number.isFinite(satisfaction)) return null;
@@ -83,7 +52,7 @@ export const actionsModule = {
         core.settings.define({
             key: SETTING_KEY,
             label: 'Confirm risky actions',
-            description: 'Before performing a known Action or Favorite Action, check affordability, protected upkeep, satisfaction, and production risks.',
+            description: 'Before performing a known Action, Favorite Action, or creating forces or equipment, check affordability, protected upkeep, satisfaction, and production risks.',
             type: 'bool',
             default: true,
             section: 'Actions',
@@ -124,6 +93,7 @@ export const actionsModule = {
     init(core) {
         const page = location.pathname.replace(/^.*\//, '');
         const el = core.el.bind(core);
+        const { actionConfirm, riskConfirmation } = createActionSafetyDialogs(core);
         const states = new Map();
         const boundForms = new WeakSet();
         let loadError = null;
@@ -133,14 +103,8 @@ export const actionsModule = {
             #clop-action-compat-summary { max-width: 820px; margin: 0 auto 12px; text-align: left; }
             .clop-action-compat-warning { margin: 8px 0; padding: 7px 9px; text-align: left; font-size: 90%; }
             .clop-action-compat-warning a, #clop-action-compat-summary a { font-weight: bold; }
-            .clop-action-tick-critical { border-width: 2px; font-size: 105%; }
             .clop-burn-oil-warning { clear: both; display: none; margin: 6px 0 4px; padding: 6px 8px; text-align: left; font-size: 90%; line-height: 1.4; }
             .clop-burn-oil-warning.clop-active { display: block; }
-            .clop-action-satisfaction-title { display: block; margin-bottom: 8px; }
-            .clop-action-satisfaction-summary { display: grid; grid-template-columns: max-content 1fr; gap: 3px 12px; }
-            .clop-action-satisfaction-summary strong { font-size: 110%; }
-            .clop-action-collapse-risk { border-width: 2px; }
-            .clop-burn-oil-risk-suggestion { margin-top: 8px; }
             .clop-action-max-input { border-top-right-radius: 0; border-bottom-right-radius: 0; }
             .clop-action-max-button { margin-left: -1px; border-top-left-radius: 0; border-bottom-left-radius: 0; vertical-align: top; }
             form.clop-action-checking { opacity: .7; pointer-events: none; }
@@ -386,54 +350,6 @@ export const actionsModule = {
             } });
         }
 
-        function actionConfirm(options) {
-            const imminentHeadline = el('strong');
-            const criticalSeconds = el('strong');
-            const imminent = el('div', { class: 'alert alert-warning', style: 'display:none;' }, [
-                imminentHeadline,
-                el('div', {}, [
-                    'Wait until afterwards, or be ready to remedy the highlighted risk before then.',
-                ]),
-            ]);
-            const critical = el('div', {
-                class: 'alert alert-danger clop-action-tick-critical',
-                style: 'display:none;',
-            }, [
-                el('strong', {}, ['TICK IS ABOUT TO HAPPEN']),
-                el('div', {}, [
-                    'Do not proceed unless you can remedy the highlighted risk within ', criticalSeconds, '.',
-                ]),
-            ]);
-            const bodyChildren = Array.isArray(options.body) ? options.body : [options.body];
-            const body = el('div', {}, [imminent, critical, ...bodyChildren]);
-
-            function updateTickWarnings() {
-                const untilTick = tickSecondsFromDocument(document);
-                const tickRelevant = options.tickRelevant !== false;
-                const showCritical = tickRelevant && tickIsCritical(untilTick, CRITICAL_TICK_SECONDS);
-                const showImminent = tickRelevant && !showCritical
-                    && tickIsImminent(untilTick, IMMINENT_TICK_SECONDS);
-                imminent.style.display = showImminent ? '' : 'none';
-                critical.style.display = showCritical ? '' : 'none';
-                if (showImminent) {
-                    imminentHeadline.textContent = `Next tick in ${formatTickDuration(untilTick)}.`;
-                }
-                if (showCritical) {
-                    criticalSeconds.textContent =
-                        `${untilTick} second${untilTick === 1 ? '' : 's'}`;
-                }
-            }
-
-            return core.confirm(affordabilityDialogOptions(core, options.affordability, {
-                ...options,
-                body,
-                onOpen: () => {
-                    updateTickWarnings();
-                    const timer = setInterval(updateTickWarnings, 250);
-                    return () => clearInterval(timer);
-                },
-            }));
-        }
 
         function unprotectedConfirmation(state) {
             const name = (state.actual && state.actual.name)
@@ -467,99 +383,6 @@ export const actionsModule = {
             return true;
         }
 
-        function signed(value) {
-            return value > 0 ? `+${core.commas(value)}` : core.commas(value);
-        }
-
-        function riskConfirmation(action, times, risks, satisfactionProjection, {
-            burnOil = null,
-            showSatisfactionTrend = true,
-            resourceRateRisks = [],
-            affordability = [],
-        } = {}) {
-            const quantity = times === 1 ? action.name : `${action.name} × ${core.commas(times)}`;
-            const body = [];
-            const hazard = satisfactionProjection && satisfactionProjection.hazard;
-            const satisfactionTrend = !!(showSatisfactionTrend && !hazard
-                && satisfactionProjection && satisfactionProjection.trendRisk);
-            if (hazard) {
-                const collapse = hazard === 'collapse';
-                const headline = collapse
-                    ? `THIS ${burnOil ? 'BURN' : 'ACTION'} WILL DESTROY YOUR NATION ON THE NEXT TICK IF NOT REMEDIED!`
-                    : `This ${burnOil ? 'burn' : 'action'} will create rebels on the next tick if not remedied!`;
-                const summary = [
-                    el('strong', { class: 'clop-action-satisfaction-title' }, [headline]),
-                ];
-
-                if (burnOil) {
-                    summary.push(el('div', { class: 'clop-action-satisfaction-summary' }, [
-                        el('span', {}, ['You selected to burn:']),
-                        el('span', {}, [
-                            el('strong', {}, [core.commas(burnOil.oilBurned)]),
-                            ` oil (burn ${core.commas(burnOil.times)} time${burnOil.times === 1 ? '' : 's'})`,
-                        ]),
-                        el('span', {}, ['Outcome:']),
-                        el('span', {}, [
-                            el('strong', {}, [core.commas(satisfactionProjection.satisfactionAfter)]),
-                            ' satisfaction',
-                        ]),
-                        el('span', {}, ['Next tick:']),
-                        el('span', {}, [
-                            el('strong', {}, [core.commas(satisfactionProjection.nextTickSatisfaction)]),
-                            ` satisfaction (projected ${signed(
-                                satisfactionProjection.perTickWithoutDecayAfter)}/tick, decay ignored)`,
-                        ]),
-                    ]));
-                } else {
-                    summary.push(el('div', { class: 'clop-action-satisfaction-summary' }, [
-                        el('span', {}, ['Outcome:']),
-                        el('span', {}, [
-                            el('strong', {}, [core.commas(satisfactionProjection.satisfactionAfter)]),
-                            ' satisfaction',
-                        ]),
-                        el('span', {}, ['Next tick:']),
-                        el('span', {}, [
-                            el('strong', {}, [core.commas(satisfactionProjection.nextTickSatisfaction)]),
-                            ` satisfaction (projected ${signed(
-                                satisfactionProjection.perTickWithoutDecayAfter)}/tick, decay ignored)`,
-                        ]),
-                    ]));
-                }
-
-                if (burnOil) {
-                    const suggestedTimes = burnOil.times % BURN_OIL_UNITS_PER_ACTION === 0
-                        ? burnOil.times / BURN_OIL_UNITS_PER_ACTION
-                        : null;
-                    if (suggestedTimes) {
-                        summary.push(el('div', { class: 'clop-burn-oil-risk-suggestion' }, [
-                            'Did you mean to burn ', el('strong', {}, [core.commas(suggestedTimes)]),
-                            ` time${suggestedTimes === 1 ? '' : 's'} instead?`,
-                        ]));
-                    }
-                }
-
-                body.push(el('div', {
-                    class: `alert alert-danger${collapse ? ' clop-action-collapse-risk' : ''}`,
-                }, summary));
-            }
-            const ordinaryWarnings = actionWarningGroup(core, {
-                resourceRateRisks, risks,
-                satisfactionTrend: satisfactionTrend ? satisfactionProjection : null,
-                burnOilReminder: !!hazard && !!burnOil,
-            });
-            if (ordinaryWarnings) body.push(ordinaryWarnings);
-            body.push(el('p', {}, [burnOil ? 'Burn anyway?' : 'Perform this action anyway?']));
-            return actionConfirm({
-                title: `Review action: ${quantity}`,
-                operation: quantity,
-                body,
-                affordability,
-                warningCount: risks.length + resourceRateRisks.length
-                    + Number(!!hazard || satisfactionTrend),
-                confirmLabel: burnOil ? 'Burn anyway' : 'Perform anyway',
-                tickRelevant: !!hazard || risks.length > 0,
-            });
-        }
 
         function bindForms() {
             const forms = actionFormsFromDocument(document);

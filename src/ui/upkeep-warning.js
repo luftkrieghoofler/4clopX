@@ -2,7 +2,7 @@
 // below the tick-consumption + military-upkeep reserve.
 import { warningSection } from './warning-content.js';
 
-export function upkeepRiskListItem(core, risk) {
+export function upkeepRiskListItem(core, risk, horizon = 'next tick') {
     const el = core.el.bind(core);
     const stockChanged = risk.stockBefore !== risk.stockAfter;
     const consumptionChanged = risk.reserveBefore !== risk.reserveAfter;
@@ -27,7 +27,7 @@ export function upkeepRiskListItem(core, risk) {
     details.push(
         ' — short by ',
         el('strong', {}, [core.commas(risk.shortage)]),
-        ' for next tick.',
+        ` for ${horizon}.`,
     );
     return el('li', {}, [
         el('strong', {}, [`${risk.name}:`]),
@@ -36,8 +36,10 @@ export function upkeepRiskListItem(core, risk) {
     ]);
 }
 
-export function upkeepWarningSection(core, risks) {
-    return risks.length ? warningSection(core, 'Insufficient stock for next tick',
-        risks.map((risk) => upkeepRiskListItem(core, risk)),
-        'Includes tick consumption and military upkeep.') : null;
+export function upkeepWarningSection(core, risks, {
+    heading = 'Insufficient stock for next tick', horizon = 'next tick',
+    description = 'Includes tick consumption and military upkeep.',
+} = {}) {
+    return risks.length ? warningSection(core, heading,
+        risks.map((risk) => upkeepRiskListItem(core, risk, horizon)), description) : null;
 }

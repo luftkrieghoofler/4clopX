@@ -228,6 +228,24 @@ export function projectActionSatisfaction(
     const afterBuildings = buildingSatisfaction(afterCounts, buildingEffects);
     const perTickChange = (afterBuildings.base - beforeBuildings.base)
         - (afterBuildings.environmentalPenalty - beforeBuildings.environmentalPenalty);
+    return projectSatisfactionChange(stats, {
+        times: effectiveTimes,
+        immediateChange: (Number(action.satisfaction) || 0) * effectiveTimes,
+        perTickChange, satisfactionMode,
+        environmentBefore: beforeBuildings, environmentAfter: afterBuildings,
+    });
+}
+
+// Shared outcome model: buildings and military size change satisfaction on
+// every normal tick, regardless of the military resource-upkeep schedule.
+export function projectSatisfactionChange(stats, {
+    times = 1, immediateChange = 0, perTickChange = 0,
+    satisfactionMode = SATISFACTION_SAFETY_MODES.STABLE,
+    environmentBefore = null, environmentAfter = null,
+} = {}) {
+    if (stats?.satisfaction == null || stats?.satisfactionPerTick == null) return null;
+    const satisfactionBefore = Number(stats.satisfaction);
+    const displayedPerTickBefore = Number(stats.satisfactionPerTick);
     const currentDecay = satisfactionDecayPenalty(satisfactionBefore, stats.government);
     const perTickWithoutDecayBefore = displayedPerTickBefore + currentDecay;
     const modeledDecay = satisfactionMode === SATISFACTION_SAFETY_MODES.MAXIMUM
@@ -236,7 +254,6 @@ export function projectActionSatisfaction(
     const perTickBefore = perTickWithoutDecayBefore - modeledDecay;
     const perTickAfter = perTickBefore + perTickChange;
     const perTickWithoutDecayAfter = perTickWithoutDecayBefore + perTickChange;
-    const immediateChange = (Number(action.satisfaction) || 0) * effectiveTimes;
     const satisfactionAfter = satisfactionBefore + immediateChange;
     // Immediate rebel/collapse safety always uses the decay-free rate.  Once
     // satisfaction has fallen anywhere near those limits the decay is zero;
@@ -258,7 +275,7 @@ export function projectActionSatisfaction(
     }
 
     return {
-        times: effectiveTimes,
+        times,
         satisfactionBefore,
         immediateChange,
         satisfactionAfter,
@@ -276,8 +293,8 @@ export function projectActionSatisfaction(
         rebelThreshold: Number.isFinite(rebelThreshold) ? rebelThreshold : null,
         hazard,
         trendRisk: perTickAfter < 0 && perTickChange < 0,
-        environmentBefore: beforeBuildings,
-        environmentAfter: afterBuildings,
+        environmentBefore,
+        environmentAfter,
     };
 }
 
