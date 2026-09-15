@@ -293,8 +293,10 @@ export function resourceTicksWorth(resource) {
     const qty = Number(resource.qty);
     const used = Number(resource.used);
     const net = Number(resource.net);
-    if (![qty, used, net].every(Number.isFinite) || net >= 0) return null;
+    if (![qty, used, net].every(Number.isFinite)) return null;
+    // Even balanced or growing resources need stock to cover the next tick.
     if (qty < used) return 0;
+    if (net >= 0) return null;
     return Math.max(0, Math.floor((qty - used) / Math.abs(net)) + 1);
 }
 

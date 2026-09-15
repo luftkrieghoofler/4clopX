@@ -348,7 +348,7 @@ export const liveUpdatesModule = {
             key: 'overview.bufferWarningTicks',
             section: 'Overview',
             label: 'Number of ticks until warning',
-            description: 'Show a yellow warning when a draining resource has this many usable ticks remaining, or satisfaction has this many safe ticks before the rebel limit.',
+            description: 'Show a yellow warning when a resource has this many usable ticks remaining, or satisfaction has this many safe ticks before the rebel limit.',
             type: 'number',
             default: 5,
             min: 0,

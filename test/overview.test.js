@@ -160,6 +160,42 @@ test('counts the usable tick omitted by the stock Ticks-Worth column', () => {
     assert.equal(resourceTicksWorth({ qty: 5, used: 5, net: 1 }), null);
 });
 
+test('insufficient upkeep stock means zero ticks regardless of net production', () => {
+    for (const net of [-5, 0, 5]) {
+        for (const qty of [0, 4]) {
+            assert.equal(resourceTicksWorth({ qty, used: 5, net }), 0);
+        }
+    }
+    for (const net of [0, 5]) {
+        for (const qty of [5, 10]) {
+            assert.equal(resourceTicksWorth({ qty, used: 5, net }), null,
+                'balanced and growing resources are safe once stock covers upkeep');
+        }
+    }
+});
+
+test('non-declining resources below upkeep feed critical badges and notification transitions', () => {
+    for (const net of [0, 5]) {
+        const before = { byName: { oil: { name: 'Oil', qty: 5, used: 5, net } } };
+        const after = { byName: { oil: { name: 'Oil', qty: 4, used: 5, net } } };
+        for (const criticalTicks of [0, 1, 5]) {
+            const summary = resourceBufferSummary(after, 5, criticalTicks);
+            assert.deepEqual(summary.critical, [{ name: 'Oil', ticks: 0 }]);
+            assert.deepEqual(summary.warning, []);
+            assert.deepEqual(overviewMenuBadgeCounts(summary), { warning: 0, critical: 1 });
+            assert.equal(resourceBufferTitleMarker(summary), '!!');
+            assert.deepEqual(newlyCriticalOverviewBuffers(before, after, 5, criticalTicks), {
+                resources: [{ name: 'Oil', ticks: 0 }], satisfaction: null,
+            });
+            assert.deepEqual(newlyCriticalOverviewBuffers(after, after, 5, criticalTicks), {
+                resources: [], satisfaction: null,
+            }, 'remaining critical does not trigger another notification');
+            assert.equal(resourceBufferSummary(before, 5, criticalTicks).affectedCount, 0,
+                'restocking clears the warning');
+        }
+    }
+});
+
 test('splits low resource buffers at the configured inclusive thresholds', () => {
     const stats = {
         byName: {
