@@ -81,6 +81,32 @@ test('uses the manually verified live Forbidden Research Facility rebalance', ()
     ]);
 });
 
+test('verifies the live Przewalskian plastics upgrade description and matching mechanics', () => {
+    const action = ACTION_CATALOG[61];
+    const description = "For 20 machinery parts, 5 precision parts, and 5 composites, you upgrade one of your plastics factories to a more efficient model available only in Przewalskia. This model produces 5 plastics per tick at the cost of 4 oil, 1 energy, and 1 satisfaction. Environmental penalties slowly accrue after each one converted beyond the first, but if you're advanced enough to build this, you've already figured out why it's a good idea...";
+    assert.deepEqual(actionCompatibility({ name: 'Upgrade Plastics Factory', description }, action),
+        { status: 'verified', differences: [] });
+    assert.deepEqual(action.items.map(({ name, amount, consumed }) => ({ name, amount, consumed })), [
+        { name: 'Plastics Factory', amount: 1, consumed: true },
+        { name: 'Machinery Parts', amount: 20, consumed: true },
+        { name: 'Precision Parts', amount: 5, consumed: true },
+        { name: 'Composites', amount: 5, consumed: true },
+    ]);
+    assert.deepEqual(action.output, {
+        resourceId: 80, name: 'Przewalskian Plastics Factory', isBuilding: true, amount: 1,
+    });
+    assert.deepEqual(BUILDING_UPKEEP[80], [
+        { resourceId: 1, name: 'Oil', amount: 4 },
+        { resourceId: 4, name: 'Energy', amount: 1 },
+    ]);
+    assert.deepEqual(BUILDING_EFFECTS[80].production, [
+        { resourceId: 28, name: 'Plastics', amount: 5 },
+    ]);
+    assert.equal(BUILDING_EFFECTS[80].satisfaction, -1);
+    assert.equal(BUILDING_EFFECTS[80].badMin, 1);
+    assert.equal(BUILDING_EFFECTS[80].badDiv, 5);
+});
+
 test('caps Solar and Lunar Environmental Facilities at five owned', () => {
     assert.equal(ACTION_CATALOG[40].maxOwned, 5);
     assert.equal(ACTION_CATALOG[41].maxOwned, 5);

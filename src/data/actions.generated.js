@@ -2571,6 +2571,9 @@ export const BUILDING_EFFECTS = {
 ACTION_CATALOG[40].maxOwned = 5;
 ACTION_CATALOG[41].maxOwned = 5;
 
+// The live description now mentions the -1 satisfaction/tick already in BUILDING_EFFECTS[80].
+ACTION_CATALOG[61].description = "For 20 machinery parts, 5 precision parts, and 5 composites, you upgrade one of your plastics factories to a more efficient model available only in Przewalskia. This model produces 5 plastics per tick at the cost of 4 oil, 1 energy, and 1 satisfaction. Environmental penalties slowly accrue after each one converted beyond the first, but if you're advanced enough to build this, you've already figured out why it's a good idea...";
+
 const DNA_EXTRACTION_REGIONS = {
     45: 'North Saddle Arabian',
     46: 'Central Saddle Arabian',
