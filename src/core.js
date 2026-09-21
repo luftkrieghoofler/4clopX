@@ -66,11 +66,14 @@ export const core = {
         },
 
         // POST form-encoded params, return the response parsed as a Document.
+        // `params` may be a function: it is then called when the request
+        // actually leaves the queue, so callers can read state that earlier
+        // queued requests still modify (the market's single-use tokens).
         postForm(url, params) {
             return this._enqueue(() => this._fetchDoc(url, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-                body: new URLSearchParams(params).toString(),
+                body: new URLSearchParams(typeof params === 'function' ? params() : params).toString(),
             }));
         },
 

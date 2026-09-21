@@ -274,3 +274,85 @@ test('keeps actionable and unavailable watched-order aggregates separate', () =>
         else globalThis.localStorage = previousStorage;
     }
 });
+
+// A fake marketplace.php implementing the server's single-use token
+// protocol (backend_marketplace.php): a POST must carry the current token,
+// every POST rotates it, and a rejected POST renders "Try again." with no
+// orders.  Responses are the minimal document stubs the adapter parses.
+function fakeMarketServer() {
+    const server = { token: 't0', rejected: 0, posts: 0 };
+    const tokenInput = () => ({ value: server.token, getAttribute: () => 'token_marketplace' });
+    const orderRow = (resourceId) => ({
+        querySelector: (selector) => {
+            if (selector === 'form') return {
+                querySelectorAll: () => [
+                    { name: 'resource_id', value: resourceId },
+                    { name: 'buyingfrom_id', value: '77' },
+                    { name: 'price', value: '10' },
+                ],
+            };
+            if (selector === 'p.text-success') return { textContent: '5' };
+            return null;
+        },
+    });
+    const respond = (errors, resourceId) => ({
+        querySelector: (selector) => {
+            if (selector === 'input[name^="token_"]') return tokenInput();
+            if (selector === '#content table.table tbody' && !errors.length) {
+                return { querySelectorAll: () => [orderRow(resourceId)] };
+            }
+            return null;
+        },
+        querySelectorAll: (selector) => (selector === '#content .alert-danger div.error'
+            ? errors.map((text) => ({ textContent: text })) : []),
+    });
+    server.fetchDoc = async (url, init) => {
+        if (!init || init.method !== 'POST') return respond([], null);
+        server.posts += 1;
+        const body = new URLSearchParams(init.body);
+        const errors = [];
+        if (body.get('token_marketplace') !== server.token) {
+            errors.push('Try again.');
+            server.rejected += 1;
+        }
+        server.token = `t${server.posts}`;
+        return respond(errors, body.get('resource_id'));
+    };
+    return server;
+}
+
+async function adapterOnRealQueue(server) {
+    const previousVersion = globalThis.__CLOPX_VERSION__;
+    globalThis.__CLOPX_VERSION__ = 'test';
+    const { core } = await import('../src/core.js');
+    if (previousVersion === undefined) delete globalThis.__CLOPX_VERSION__;
+    else globalThis.__CLOPX_VERSION__ = previousVersion;
+    const http = { ...core.http, _chain: Promise.resolve(), _fetchDoc: (url, init) => server.fetchDoc(url, init) };
+    return createMarketAdapter({ http }, 'sell', '', await server.fetchDoc('marketplace.php', { method: 'GET' }));
+}
+
+test('loads queued while another load is in flight each carry the token of the previous response', async () => {
+    const server = fakeMarketServer();
+    const adapter = await adapterOnRealQueue(server);
+    // The marketplace view, the live-update sweep and a Refresh click can
+    // all queue loads before the first response returns.
+    const snapshots = await Promise.all([adapter.load('1'), adapter.load('2'), adapter.load('3')]);
+    assert.equal(server.rejected, 0, 'no request may reuse a consumed token');
+    assert.equal(server.posts, 3);
+    assert.deepEqual(snapshots.map((s) => s.orders.map((o) => o.resourceId)), [['1'], ['2'], ['3']]);
+    assert.deepEqual(snapshots.map((s) => s.resourceId), ['1', '2', '3']);
+});
+
+test('a token consumed by another tab costs one retry; a persistently moving token fails loudly', async () => {
+    const server = fakeMarketServer();
+    const adapter = await adapterOnRealQueue(server);
+    server.token = 'other-tab';                 // another tab POSTed meanwhile
+    const snapshot = await adapter.load('1');
+    assert.equal(server.rejected, 1);
+    assert.deepEqual(snapshot.orders.map((o) => o.resourceId), ['1']);
+    assert.deepEqual(snapshot.messages.errors, [], 'the absorbed rejection is not reported');
+
+    const honest = server.fetchDoc;
+    server.fetchDoc = (url, init) => { server.token = `stolen-${server.posts}`; return honest(url, init); };
+    await assert.rejects(adapter.load('2'), /another tab/);
+});

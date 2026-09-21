@@ -263,17 +263,28 @@ export function createMarketAdapter(core, kind, mode, seedDoc = null) {
 
     async function post(params, resourceId) {
         await ready();
-        const send = () => core.http.postForm(PAGES[kind], {
+        // The token is read when the request leaves the serialized queue,
+        // not when it is queued: any request queued ahead of this one
+        // rotates the token, and its response is absorbed before the next
+        // request starts.  Capturing the token here would make two queued
+        // loads of one market share a token and reject the second.
+        const send = () => core.http.postForm(PAGES[kind], () => ({
             [tokenField]: token, mode, resource_id: resourceId, ...params,
-        });
+        }));
         let doc = absorbToken(await send());
         let messages = marketMessagesFromDocument(doc);
         if (messages.errors.some(isTryAgain)) {
-            // Stale token (e.g. another browser tab consumed it); the failed
-            // response already delivered the fresh one via absorbToken.
+            // Stale token: another browser tab consumed it.  The rejected
+            // response delivered the fresh one via absorbToken, and the
+            // server executed nothing, so one retry is safe.
             doc = absorbToken(await send());
             messages = marketMessagesFromDocument(doc);
-            messages.errors = messages.errors.filter((e) => !isTryAgain(e));
+            if (messages.errors.some(isTryAgain)) {
+                // Rejected twice: the token keeps moving under us.  A
+                // rejected response carries no orders, so returning it as a
+                // snapshot would present a spuriously empty market.
+                throw new Error('The market was updated by another tab at the same time — please try again.');
+            }
         }
         return snapshot(doc, messages, resourceId);
     }
