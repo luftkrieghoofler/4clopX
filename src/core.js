@@ -58,8 +58,15 @@ export const core = {
             return p;
         },
 
+        // The GM_* grants make managers run this in a sandbox instead of the
+        // page. There, relative URLs do not resolve against the page, and in
+        // Firefox a plain fetch is sent as the extension; content.fetch is
+        // sent as the page.
         _fetchDoc(url, init) {
-            return fetch(url, { credentials: 'same-origin', ...init }).then((r) => {
+            const href = new URL(url, location.href).href;
+            const request = { credentials: 'same-origin', ...init };
+            const pending = globalThis.content?.fetch ? globalThis.content.fetch(href, request) : fetch(href, request);
+            return pending.then((r) => {
                 if (!r.ok) throw new Error(`HTTP ${r.status} ${r.statusText}`);
                 return r.text();
             }).then((text) => new DOMParser().parseFromString(text, 'text/html'));
